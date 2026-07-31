@@ -1,3 +1,5 @@
+//go:build cssstub
+
 package storage
 
 type ExpiringStorage interface {

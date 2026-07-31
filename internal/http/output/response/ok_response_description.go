@@ -1,3 +1,5 @@
+//go:build cssstub
+
 // Package response provides an OkResponseDescription for 200/206 responses.
 package response
 

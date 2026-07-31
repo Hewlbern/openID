@@ -1,3 +1,5 @@
+//go:build cssstub
+
 // Package metadatawriter implements a writer that generates Set-Cookie headers from metadata.
 package metadatawriter
 

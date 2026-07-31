@@ -1,3 +1,5 @@
+//go:build cssstub
+
 // Package identifier provides the TargetExtractor interface for extracting resource targets from HTTP requests.
 package identifier
 

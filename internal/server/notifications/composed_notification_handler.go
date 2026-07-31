@@ -1,3 +1,5 @@
+//go:build cssstub
+
 package notifications
 
 // ComposedNotificationHandler is a placeholder for the Go equivalent of ComposedNotificationHandler.ts.

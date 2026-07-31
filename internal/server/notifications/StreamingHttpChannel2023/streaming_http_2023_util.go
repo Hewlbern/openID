@@ -1,3 +1,5 @@
+//go:build cssstub
+
 package streaminghttpchannel2023
 
 // StreamingHttp2023Util is a placeholder for the Go equivalent of StreamingHttp2023Util.ts.

@@ -1,3 +1,5 @@
+//go:build cssstub
+
 // Package permissions provides utility functions for permission handling.
 package permissions
 

@@ -1,3 +1,5 @@
+//go:build cssstub
+
 // Package conditions provides BasicConditionsParser for parsing HTTP precondition headers.
 package conditions
 

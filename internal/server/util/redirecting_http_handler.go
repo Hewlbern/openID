@@ -1,3 +1,5 @@
+//go:build cssstub
+
 package util
 
 // RedirectingHttpHandler is a placeholder for the Go equivalent of RedirectingHttpHandler.ts.

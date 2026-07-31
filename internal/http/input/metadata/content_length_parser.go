@@ -1,3 +1,5 @@
+//go:build cssstub
+
 // Package metadata provides a parser for the content-length header.
 package metadata
 

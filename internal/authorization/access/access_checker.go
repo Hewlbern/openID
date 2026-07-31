@@ -1,3 +1,5 @@
+//go:build cssstub
+
 // Package access provides the AccessChecker interface for resource access control.
 package access
 

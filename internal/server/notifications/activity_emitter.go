@@ -1,3 +1,5 @@
+//go:build cssstub
+
 package notifications
 
 // ActivityEmitter is a placeholder for the Go equivalent of ActivityEmitter.ts.

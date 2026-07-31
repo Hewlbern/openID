@@ -1,3 +1,5 @@
+//go:build cssstub
+
 // Package authorization provides implementations for WebACL-based permission reading.
 package authorization
 

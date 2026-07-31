@@ -1,3 +1,5 @@
+//go:build cssstub
+
 // Package representation provides types and interfaces translated from the TypeScript representation folder.
 package representation
 

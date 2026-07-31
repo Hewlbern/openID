@@ -1,3 +1,5 @@
+//go:build cssstub
+
 package notifications
 
 // Notification is a placeholder for the Go equivalent of Notification.ts.

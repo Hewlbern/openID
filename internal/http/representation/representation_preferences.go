@@ -1,3 +1,5 @@
+//go:build cssstub
+
 // Package representation provides the RepresentationPreferences struct and related types.
 package representation
 

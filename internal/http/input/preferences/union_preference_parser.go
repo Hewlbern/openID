@@ -1,3 +1,5 @@
+//go:build cssstub
+
 // Package preferences provides UnionPreferenceParser for combining multiple PreferenceParsers.
 package preferences
 

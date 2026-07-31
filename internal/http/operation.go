@@ -1,3 +1,5 @@
+//go:build cssstub
+
 // Package http provides the Operation type and related interfaces for REST operations.
 package http
 

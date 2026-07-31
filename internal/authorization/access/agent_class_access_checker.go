@@ -1,3 +1,5 @@
+//go:build cssstub
+
 // Package access implements access control for agent classes.
 package access
 

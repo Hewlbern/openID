@@ -1,3 +1,5 @@
+//go:build cssstub
+
 package websocketchannel2023
 
 // WebSocketMap is a placeholder for the Go equivalent of WebSocketMap.ts.

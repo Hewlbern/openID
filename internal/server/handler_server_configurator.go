@@ -1,3 +1,5 @@
+//go:build cssstub
+
 // Go equivalent of HandlerServerConfigurator.ts
 package server
 

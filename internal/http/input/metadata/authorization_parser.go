@@ -1,3 +1,5 @@
+//go:build cssstub
+
 // Package metadata provides a parser for specific authorization schemes and stores their value as metadata.
 package metadata
 

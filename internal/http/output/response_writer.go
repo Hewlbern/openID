@@ -1,3 +1,5 @@
+//go:build cssstub
+
 // Package output provides the ResponseWriter interface.
 package output
 

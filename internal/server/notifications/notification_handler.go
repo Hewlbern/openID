@@ -1,3 +1,5 @@
+//go:build cssstub
+
 package notifications
 
 // NotificationHandler is a placeholder for the Go equivalent of NotificationHandler.ts.

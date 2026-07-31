@@ -1,3 +1,5 @@
+//go:build cssstub
+
 // Package response provides a RedirectResponseDescription for redirect responses.
 package response
 

@@ -1,3 +1,5 @@
+//go:build cssstub
+
 package websocketchannel2023
 
 // WebSocket2023Storer is a placeholder for the Go equivalent of WebSocket2023Storer.ts.

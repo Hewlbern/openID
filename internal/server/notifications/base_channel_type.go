@@ -1,3 +1,5 @@
+//go:build cssstub
+
 package notifications
 
 // BaseChannelType is a placeholder for the Go equivalent of BaseChannelType.ts.

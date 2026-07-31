@@ -1,3 +1,5 @@
+//go:build cssstub
+
 // Package body provides the BodyParser interface for parsing HTTP request bodies.
 package body
 

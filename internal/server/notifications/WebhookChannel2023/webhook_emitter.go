@@ -1,3 +1,5 @@
+//go:build cssstub
+
 package webhookchannel2023
 
 // WebhookEmitter is a placeholder for the Go equivalent of WebhookEmitter.ts.

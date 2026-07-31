@@ -1,3 +1,5 @@
+//go:build cssstub
+
 // Package preferences provides RangePreferenceParser for parsing Range headers.
 package preferences
 

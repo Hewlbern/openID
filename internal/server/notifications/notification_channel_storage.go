@@ -1,3 +1,5 @@
+//go:build cssstub
+
 package notifications
 
 // NotificationChannelStorage is a placeholder for the Go equivalent of NotificationChannelStorage.ts.

@@ -1,3 +1,5 @@
+//go:build cssstub
+
 package interaction
 
 const InternalApiVersion = "0.5"

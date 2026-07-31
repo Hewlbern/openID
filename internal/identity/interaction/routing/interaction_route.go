@@ -1,3 +1,5 @@
+//go:build cssstub
+
 package routing
 
 // RouteParameter represents the parameters supported for the given route

@@ -1,3 +1,5 @@
+//go:build cssstub
+
 // Package auxiliary provides the RdfValidator interface and base struct.
 package auxiliary
 

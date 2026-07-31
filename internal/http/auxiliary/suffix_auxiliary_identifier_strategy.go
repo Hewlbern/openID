@@ -1,3 +1,5 @@
+//go:build cssstub
+
 // Package auxiliary provides the SuffixAuxiliaryIdentifierStrategy struct and logic.
 package auxiliary
 

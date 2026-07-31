@@ -1,3 +1,5 @@
+//go:build cssstub
+
 // Package metadatawriter implements a writer that adds a storage description link header.
 package metadatawriter
 

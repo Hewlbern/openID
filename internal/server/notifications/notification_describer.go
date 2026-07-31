@@ -1,3 +1,5 @@
+//go:build cssstub
+
 package notifications
 
 // NotificationDescriber is a placeholder for the Go equivalent of NotificationDescriber.ts.

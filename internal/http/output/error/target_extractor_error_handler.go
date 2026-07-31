@@ -1,3 +1,5 @@
+//go:build cssstub
+
 // Package errorhandler implements an ErrorHandler that adds metadata to an error to indicate the targeted resource identifier.
 package errorhandler
 

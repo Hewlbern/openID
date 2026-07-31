@@ -1,3 +1,5 @@
+//go:build cssstub
+
 // Package errorhandler implements an ErrorHandler that converts errors into a representation and feeds it into a converter.
 package errorhandler
 

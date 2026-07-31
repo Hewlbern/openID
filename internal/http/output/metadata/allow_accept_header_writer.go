@@ -1,3 +1,5 @@
+//go:build cssstub
+
 // Package metadatawriter implements a writer that generates Allow, Accept-Patch, Accept-Post, and Accept-Put headers.
 package metadatawriter
 

@@ -2,33 +2,28 @@ FROM golang:1.24-alpine AS builder
 
 WORKDIR /app
 
-# Copy go mod and sum files
-COPY go.mod ./
-# Optional go.sum if we have it
-COPY go.sum ./
+RUN apk add --no-cache git ca-certificates
 
-# Download all dependencies
+COPY go.mod go.sum ./
 RUN go mod download
 
-# Copy the source code
 COPY . .
 
-# Build the application
 RUN CGO_ENABLED=0 GOOS=linux go build -o /solidgo ./cmd/server
 
-# Create a minimal image for running the application
 FROM alpine:latest
 
-# Add CA certificates for HTTPS
-RUN apk --no-cache add ca-certificates
+RUN apk --no-cache add ca-certificates wget
 
-WORKDIR /root/
+WORKDIR /app
 
-# Copy the binary from the builder stage
-COPY --from=builder /solidgo .
+COPY --from=builder /solidgo /usr/local/bin/solidgo
 
-# Expose the default port
-EXPOSE 8080
+ENV SOLID_PORT=3000
+ENV SOLID_STORAGE_PATH=/data
 
-# Command to run the executable
-CMD ["./solidgo"] 
+EXPOSE 3000
+
+VOLUME ["/data"]
+
+CMD ["solidgo", "-port", "3000", "-storage", "/data"]

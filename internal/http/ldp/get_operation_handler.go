@@ -1,3 +1,5 @@
+//go:build cssstub
+
 // Package ldp provides the GetOperationHandler struct.
 package ldp
 

@@ -1,3 +1,5 @@
+//go:build cssstub
+
 package description
 
 // RootStorageLocationStrategy is used when the server has one storage in the root container.

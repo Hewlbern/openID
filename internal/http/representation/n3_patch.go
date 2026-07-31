@@ -1,3 +1,5 @@
+//go:build cssstub
+
 // Package representation provides the N3Patch struct.
 package representation
 

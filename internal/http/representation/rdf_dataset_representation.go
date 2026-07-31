@@ -1,3 +1,5 @@
+//go:build cssstub
+
 // Package representation provides the RdfDatasetRepresentation struct.
 package representation
 

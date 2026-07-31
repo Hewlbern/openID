@@ -1,3 +1,5 @@
+//go:build cssstub
+
 // Package metadata provides a parser for the Slug header and converts its contents to metadata.
 package metadata
 

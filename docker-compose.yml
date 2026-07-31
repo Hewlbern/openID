@@ -6,20 +6,38 @@ services:
       context: .
       dockerfile: Dockerfile
     ports:
-      - "8080:8080"
+      - "3000:3000"
     volumes:
-      - ./data:/data
+      - solid-data:/data
     environment:
-      - SOLID_PORT=8080
+      - SOLID_PORT=3000
       - SOLID_STORAGE_PATH=/data
+      - SOLID_BASE_URL=http://localhost:3000
       - SOLID_LOG_LEVEL=info
+      - IPFS_API=http://ipfs:5001
+      - AUDIT_BATCH_INTERVAL=30s
+      - SOLID_TOKEN_SECRET=change-me-in-production
+    depends_on:
+      - ipfs
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "--spider", "http://localhost:8080/health"]
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 5s
+      start_period: 10s
+
+  ipfs:
+    image: ipfs/kubo:v0.32.1
+    ports:
+      - "4001:4001"
+      - "5001:5001"
+      - "8081:8080"
+    volumes:
+      - ipfs-data:/data/ipfs
+    environment:
+      - IPFS_PROFILE=server
+    restart: unless-stopped
 
   solid-tests:
     build:
@@ -28,5 +46,11 @@ services:
     volumes:
       - .:/app
     environment:
-      GO_TEST_FLAGS: "-v -race -coverprofile=coverage.out"
-    command: sh -c "go test ./... ${GO_TEST_FLAGS}" 
+      GO_TEST_FLAGS: "-v -count=1"
+    command: sh -c "go test ./internal/... ./test/... ${GO_TEST_FLAGS}"
+    profiles:
+      - test
+
+volumes:
+  solid-data:
+  ipfs-data:

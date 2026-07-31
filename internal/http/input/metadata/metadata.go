@@ -1,3 +1,5 @@
+//go:build cssstub
+
 // Package metadata provides types and interfaces translated from the TypeScript input/metadata folder.
 package metadata
 

@@ -1,3 +1,5 @@
+//go:build cssstub
+
 // Package errorhandler implements an ErrorHandler that returns an error response without a body for certain status codes.
 package errorhandler
 

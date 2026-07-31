@@ -1,3 +1,5 @@
+//go:build cssstub
+
 // Package auxiliary provides the MetadataGenerator interface and base struct.
 package auxiliary
 

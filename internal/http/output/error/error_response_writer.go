@@ -1,3 +1,5 @@
+//go:build cssstub
+
 // Package error provides error handling interfaces for HTTP output.
 package error
 

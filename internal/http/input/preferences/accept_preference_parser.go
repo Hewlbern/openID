@@ -1,3 +1,5 @@
+//go:build cssstub
+
 // Package preferences provides AcceptPreferenceParser for extracting preferences from Accept-* headers.
 package preferences
 

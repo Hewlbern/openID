@@ -1,3 +1,5 @@
+//go:build cssstub
+
 // Package ldp provides the OperationHandler interface and input struct.
 package ldp
 

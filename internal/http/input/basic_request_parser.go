@@ -1,3 +1,5 @@
+//go:build cssstub
+
 // Package input provides the BasicRequestParser and its dependencies.
 package input
 

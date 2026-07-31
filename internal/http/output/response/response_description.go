@@ -1,3 +1,5 @@
+//go:build cssstub
+
 // Package response provides response description interfaces for HTTP output.
 package response
 

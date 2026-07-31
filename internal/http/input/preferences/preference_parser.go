@@ -1,3 +1,5 @@
+//go:build cssstub
+
 // Package preferences provides the PreferenceParser interface for extracting preferences from HTTP headers.
 package preferences
 

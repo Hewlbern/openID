@@ -1,3 +1,5 @@
+//go:build cssstub
+
 // Package conditions provides the ConditionsParser interface for parsing HTTP request conditions.
 package conditions
 

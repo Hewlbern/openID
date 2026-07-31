@@ -1,3 +1,5 @@
+//go:build cssstub
+
 // Package errorhandler provides interfaces and implementations for error handling in HTTP output.
 package errorhandler
 

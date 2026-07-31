@@ -1,3 +1,5 @@
+//go:build cssstub
+
 // Package representation provides the SparqlUpdatePatch struct.
 package representation
 

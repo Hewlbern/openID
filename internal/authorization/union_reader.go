@@ -1,3 +1,5 @@
+//go:build cssstub
+
 // Package authorization provides implementations for combining multiple permission readers.
 package authorization
 

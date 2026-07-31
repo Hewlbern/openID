@@ -1,3 +1,5 @@
+//go:build cssstub
+
 package notifications
 
 // KeyValueChannelStorage is a placeholder for the Go equivalent of KeyValueChannelStorage.ts.

@@ -1,3 +1,5 @@
+//go:build cssstub
+
 // Package metadatawriter implements a writer that adds Link headers based on metadata predicates.
 package metadatawriter
 

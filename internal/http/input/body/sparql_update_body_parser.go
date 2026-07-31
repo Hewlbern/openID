@@ -1,3 +1,5 @@
+//go:build cssstub
+
 // Package body implements a BodyParser that supports application/sparql-update content.
 package body
 

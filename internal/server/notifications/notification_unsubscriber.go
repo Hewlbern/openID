@@ -1,3 +1,5 @@
+//go:build cssstub
+
 package notifications
 
 // NotificationUnsubscriber is a placeholder for the Go equivalent of NotificationUnsubscriber.ts.

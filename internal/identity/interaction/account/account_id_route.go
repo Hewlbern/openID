@@ -1,3 +1,5 @@
+//go:build cssstub
+
 package account
 
 const AccountIdKey = "accountId"

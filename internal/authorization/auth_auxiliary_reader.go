@@ -1,3 +1,5 @@
+//go:build cssstub
+
 // Package authorization provides implementations for reading authentication-related auxiliary resource permissions.
 package authorization
 

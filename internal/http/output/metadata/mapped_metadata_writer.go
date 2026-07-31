@@ -1,3 +1,5 @@
+//go:build cssstub
+
 // Package metadatawriter implements a writer that maps metadata predicates to headers.
 package metadatawriter
 

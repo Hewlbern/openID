@@ -1,3 +1,5 @@
+//go:build cssstub
+
 package generate
 
 // ActivityNotificationGenerator is a placeholder for the Go equivalent of ActivityNotificationGenerator.ts.

@@ -1,3 +1,5 @@
+//go:build cssstub
+
 package websocketchannel2023
 
 // WebSocketChannel2023Type is a placeholder for the Go equivalent of WebSocketChannel2023Type.ts.

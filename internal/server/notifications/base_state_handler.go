@@ -1,3 +1,5 @@
+//go:build cssstub
+
 package notifications
 
 // BaseStateHandler is a placeholder for the Go equivalent of BaseStateHandler.ts.

@@ -1,3 +1,5 @@
+//go:build cssstub
+
 // Package metadatawriter implements a writer that adds the Content-Type header.
 package metadatawriter
 

@@ -1,3 +1,5 @@
+//go:build cssstub
+
 // Package metadatawriter implements a writer that adds the WAC-Allow header for access control.
 package metadatawriter
 

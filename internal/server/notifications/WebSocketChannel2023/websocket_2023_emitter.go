@@ -1,3 +1,5 @@
+//go:build cssstub
+
 package websocketchannel2023
 
 // WebSocket2023Emitter is a placeholder for the Go equivalent of WebSocket2023Emitter.ts.

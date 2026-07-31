@@ -1,3 +1,5 @@
+//go:build cssstub
+
 // Package metadatawriter implements a writer that adds the WWW-Authenticate header for 401 responses.
 package metadatawriter
 

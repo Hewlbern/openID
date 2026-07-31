@@ -1,3 +1,5 @@
+//go:build cssstub
+
 // Package auxiliary provides the AuxiliaryIdentifierStrategy interface.
 //
 // AuxiliaryIdentifierStrategy defines a strategy for handling auxiliary-related ResourceIdentifiers.

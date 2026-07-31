@@ -1,3 +1,5 @@
+//go:build cssstub
+
 package acl
 
 // ACL represents an Access Control List

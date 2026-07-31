@@ -1,3 +1,5 @@
+//go:build cssstub
+
 package representation
 
 // ResourceIdentifier represents a resource identifier

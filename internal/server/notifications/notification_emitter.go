@@ -1,3 +1,5 @@
+//go:build cssstub
+
 package notifications
 
 // NotificationEmitter is a placeholder for the Go equivalent of NotificationEmitter.ts.

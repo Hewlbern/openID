@@ -1,3 +1,5 @@
+//go:build cssstub
+
 // Package representation provides the RepresentationMetadata struct.
 package representation
 

@@ -1,3 +1,5 @@
+//go:build cssstub
+
 // Package metadatawriter implements a writer that generates Content-Range and Content-Length headers for range requests.
 package metadatawriter
 

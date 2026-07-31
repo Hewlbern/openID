@@ -1,3 +1,5 @@
+//go:build cssstub
+
 package notifications
 
 // NotificationChannel is a placeholder for the Go equivalent of NotificationChannel.ts.

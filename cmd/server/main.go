@@ -5,7 +5,9 @@ import (
 	"flag"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
+	"time"
 
 	"solid-go/internal/logging"
 	"solid-go/internal/server"
@@ -13,42 +15,41 @@ import (
 )
 
 func main() {
-	// Create logger
 	logger := logging.NewBasicLogger(logging.Info)
 
-	// Parse command line flags
-	port := flag.Int("port", 3000, "Port to listen on")
+	port := flag.Int("port", envInt("SOLID_PORT", 3000), "Port to listen on")
 	https := flag.Bool("https", false, "Use HTTPS")
 	certFile := flag.String("cert", "", "Path to TLS certificate file")
 	keyFile := flag.String("key", "", "Path to TLS private key file")
-	storagePath := flag.String("storage", "./data", "Path to storage directory")
+	storagePath := flag.String("storage", envStr("SOLID_STORAGE_PATH", "./data"), "Path to storage directory")
+	baseURL := flag.String("base-url", os.Getenv("SOLID_BASE_URL"), "Public base URL")
+	ipfsAPI := flag.String("ipfs-api", os.Getenv("IPFS_API"), "Kubo IPFS HTTP API URL")
 	flag.Parse()
 
-	// Create storage
 	store, err := storage.NewFileStorage(*storagePath)
 	if err != nil {
 		logger.Error("Error creating storage: %v", err)
 		os.Exit(1)
 	}
 
-	// Create server options
 	options := &server.ServerOptions{
-		Port:     *port,
-		HTTPS:    *https,
-		CertFile: *certFile,
-		KeyFile:  *keyFile,
-		Storage:  store,
-		Logger:   logger,
+		Port:            *port,
+		HTTPS:           *https,
+		CertFile:        *certFile,
+		KeyFile:         *keyFile,
+		Storage:         store,
+		StoragePath:     *storagePath,
+		Logger:          logger,
+		BaseURL:         *baseURL,
+		IPFSAPI:         *ipfsAPI,
+		AuditBatchEvery: envDuration("AUDIT_BATCH_INTERVAL", 30*time.Second),
 	}
 
-	// Create server
 	srv := server.NewServer(options)
 
-	// Create context that listens for the interrupt signal from the OS
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	// Start server
 	go func() {
 		var err error
 		if *https {
@@ -67,15 +68,38 @@ func main() {
 	}()
 
 	logger.Info("Server listening on port %d", *port)
-
-	// Wait for interrupt signal
 	<-ctx.Done()
 
-	// Shutdown server
 	if err := srv.Shutdown(context.Background()); err != nil {
 		logger.Error("Error shutting down server: %v", err)
 		os.Exit(1)
 	}
-
 	logger.Info("Server stopped")
+}
+
+func envStr(k, def string) string {
+	if v := os.Getenv(k); v != "" {
+		return v
+	}
+	return def
+}
+
+func envInt(k string, def int) int {
+	if v := os.Getenv(k); v != "" {
+		n, err := strconv.Atoi(v)
+		if err == nil {
+			return n
+		}
+	}
+	return def
+}
+
+func envDuration(k string, def time.Duration) time.Duration {
+	if v := os.Getenv(k); v != "" {
+		d, err := time.ParseDuration(v)
+		if err == nil {
+			return d
+		}
+	}
+	return def
 }

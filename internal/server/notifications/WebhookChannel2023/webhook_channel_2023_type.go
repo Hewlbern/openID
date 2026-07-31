@@ -1,3 +1,5 @@
+//go:build cssstub
+
 package webhookchannel2023
 
 // WebhookChannel2023Type is a placeholder for the Go equivalent of WebhookChannel2023Type.ts.

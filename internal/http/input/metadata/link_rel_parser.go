@@ -1,3 +1,5 @@
+//go:build cssstub
+
 // Package metadata provides a parser for Link headers with a specific rel value and adds them as metadata.
 package metadata
 

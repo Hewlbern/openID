@@ -1,3 +1,5 @@
+//go:build cssstub
+
 package variables
 
 // VariableType is the type of a variable

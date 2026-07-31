@@ -1,3 +1,5 @@
+//go:build cssstub
+
 // Package metadatawriter implements a writer that adds auxiliary Link headers.
 package metadatawriter
 

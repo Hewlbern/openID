@@ -1,3 +1,5 @@
+//go:build cssstub
+
 // Package auxiliary provides the ComposedAuxiliaryStrategy struct and related logic.
 package auxiliary
 

@@ -1,3 +1,5 @@
+//go:build cssstub
+
 package notifications
 
 // TypedNotificationHandler is a placeholder for the Go equivalent of TypedNotificationHandler.ts.

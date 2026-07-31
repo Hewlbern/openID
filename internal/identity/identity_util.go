@@ -1,3 +1,5 @@
+//go:build cssstub
+
 package identity
 
 // ImportOidcProvider is a placeholder for OIDC provider initialization in Go.

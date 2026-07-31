@@ -1,3 +1,5 @@
+//go:build cssstub
+
 package serialize
 
 // NotificationSerializer is a placeholder for the Go equivalent of NotificationSerializer.ts.

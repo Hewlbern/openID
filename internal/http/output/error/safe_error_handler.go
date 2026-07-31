@@ -1,3 +1,5 @@
+//go:build cssstub
+
 // Package errorhandler implements a failsafe ErrorHandler that returns a simple text description of an error.
 package errorhandler
 

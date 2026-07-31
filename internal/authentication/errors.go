@@ -1,3 +1,5 @@
+//go:build cssstub
+
 // Package authentication provides implementations for authentication and credential management.
 package authentication
 

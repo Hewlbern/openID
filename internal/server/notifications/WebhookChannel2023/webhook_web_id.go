@@ -1,3 +1,5 @@
+//go:build cssstub
+
 package webhookchannel2023
 
 // WebhookWebId is a placeholder for the Go equivalent of WebhookWebId.ts.

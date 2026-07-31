@@ -1,3 +1,5 @@
+//go:build cssstub
+
 package serialize
 
 // JsonLdNotificationSerializer is a placeholder for the Go equivalent of JsonLdNotificationSerializer.ts.

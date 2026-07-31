@@ -1,3 +1,5 @@
+//go:build cssstub
+
 package identity
 
 // WebID represents a WebID profile

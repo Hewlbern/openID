@@ -1,3 +1,5 @@
+//go:build cssstub
+
 // Package errorhandler implements an ErrorHandler that converts redirect errors to redirect response descriptions.
 package errorhandler
 

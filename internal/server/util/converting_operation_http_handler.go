@@ -1,3 +1,5 @@
+//go:build cssstub
+
 package util
 
 // ConvertingOperationHttpHandler is a placeholder for the Go equivalent of ConvertingOperationHttpHandler.ts.

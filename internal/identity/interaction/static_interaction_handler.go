@@ -1,3 +1,5 @@
+//go:build cssstub
+
 package interaction
 
 type StaticInteractionHandler struct {

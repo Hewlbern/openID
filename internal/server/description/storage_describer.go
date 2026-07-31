@@ -1,3 +1,5 @@
+//go:build cssstub
+
 package description
 
 // StorageDescriber describes storage containers and can handle storage description requests.

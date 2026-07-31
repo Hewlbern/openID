@@ -1,3 +1,5 @@
+//go:build cssstub
+
 // Package auxiliary provides the RoutingAuxiliaryIdentifierStrategy struct and logic.
 package auxiliary
 

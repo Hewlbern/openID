@@ -1,3 +1,5 @@
+//go:build cssstub
+
 package util
 
 // RouterHandler is a placeholder for the Go equivalent of RouterHandler.ts.

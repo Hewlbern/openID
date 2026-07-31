@@ -1,3 +1,5 @@
+//go:build cssstub
+
 package middleware
 
 import "net/http"

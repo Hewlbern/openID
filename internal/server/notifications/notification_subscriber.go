@@ -1,3 +1,5 @@
+//go:build cssstub
+
 package notifications
 
 // NotificationSubscriber is a placeholder for the Go equivalent of NotificationSubscriber.ts.

@@ -1,3 +1,5 @@
+//go:build cssstub
+
 // Package ldp provides the PostOperationHandler struct.
 package ldp
 

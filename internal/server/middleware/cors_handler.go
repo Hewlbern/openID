@@ -1,3 +1,5 @@
+//go:build cssstub
+
 package middleware
 
 // CorsHandler is a placeholder for the Go equivalent of CorsHandler.ts.

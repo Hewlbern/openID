@@ -1,3 +1,5 @@
+//go:build cssstub
+
 package ldp
 
 // Container represents a Linked Data Platform container

@@ -1,3 +1,5 @@
+//go:build cssstub
+
 package generate
 
 // AddRemoveNotificationGenerator is a placeholder for the Go equivalent of AddRemoveNotificationGenerator.ts.

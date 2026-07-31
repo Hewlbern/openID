@@ -1,3 +1,5 @@
+//go:build cssstub
+
 package routing
 
 type AbsolutePathInteractionRoute struct {

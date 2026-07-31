@@ -1,3 +1,5 @@
+//go:build cssstub
+
 // Package response provides a ResetResponseDescription for 205 responses.
 package response
 

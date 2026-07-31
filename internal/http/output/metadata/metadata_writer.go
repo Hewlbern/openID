@@ -1,3 +1,5 @@
+//go:build cssstub
+
 // Package metadata provides metadata writing interfaces for HTTP output.
 package metadata
 

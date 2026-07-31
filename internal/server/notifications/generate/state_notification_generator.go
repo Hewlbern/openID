@@ -1,3 +1,5 @@
+//go:build cssstub
+
 package generate
 
 // StateNotificationGenerator is a placeholder for the Go equivalent of StateNotificationGenerator.ts.

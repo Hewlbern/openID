@@ -1,3 +1,5 @@
+//go:build cssstub
+
 package description
 
 // ResourceIdentifier represents a resource's unique identifier (e.g., a URI or path).

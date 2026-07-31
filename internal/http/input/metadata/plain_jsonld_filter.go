@@ -1,3 +1,5 @@
+//go:build cssstub
+
 // Package metadata provides a filter that errors on JSON-LD with a plain application/json content-type.
 package metadata
 

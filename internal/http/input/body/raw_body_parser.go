@@ -1,3 +1,5 @@
+//go:build cssstub
+
 // Package body implements a BodyParser that converts incoming requests to a BasicRepresentation without further parsing.
 package body
 

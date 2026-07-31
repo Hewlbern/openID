@@ -1,3 +1,5 @@
+//go:build cssstub
+
 // Package response provides a CreatedResponseDescription for 201 responses.
 package response
 

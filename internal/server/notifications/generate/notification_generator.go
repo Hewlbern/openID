@@ -1,3 +1,5 @@
+//go:build cssstub
+
 package generate
 
 // NotificationGenerator is a placeholder for the Go equivalent of NotificationGenerator.ts.

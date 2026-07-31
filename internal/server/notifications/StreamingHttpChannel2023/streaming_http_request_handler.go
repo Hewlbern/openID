@@ -1,3 +1,5 @@
+//go:build cssstub
+
 package streaminghttpchannel2023
 
 // StreamingHttpRequestHandler is a placeholder for the Go equivalent of StreamingHttpRequestHandler.ts.

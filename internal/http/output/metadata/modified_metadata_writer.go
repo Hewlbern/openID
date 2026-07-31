@@ -1,3 +1,5 @@
+//go:build cssstub
+
 // Package metadatawriter implements a writer that generates Last-Modified and ETag headers.
 package metadatawriter
 

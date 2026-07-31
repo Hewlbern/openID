@@ -1,3 +1,5 @@
+//go:build cssstub
+
 package description
 
 // IdentifierGenerator is used to extract the root pod URL from a resource identifier.

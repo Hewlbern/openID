@@ -1,3 +1,5 @@
+//go:build cssstub
+
 package generate
 
 // DeleteNotificationGenerator is a placeholder for the Go equivalent of DeleteNotificationGenerator.ts.

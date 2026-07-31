@@ -1,3 +1,5 @@
+//go:build cssstub
+
 // Package identifier provides OriginalUrlExtractor for reconstructing the original URL from an HTTP request.
 package identifier
 

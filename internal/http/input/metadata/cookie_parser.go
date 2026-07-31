@@ -1,3 +1,5 @@
+//go:build cssstub
+
 // Package metadata provides a parser for cookies and stores their values as metadata.
 package metadata
 

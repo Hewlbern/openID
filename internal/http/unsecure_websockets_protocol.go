@@ -1,3 +1,5 @@
+//go:build cssstub
+
 // Package http provides UnsecureWebSocketsProtocol for Solid WebSockets API Spec solid-0.1.
 package http
 

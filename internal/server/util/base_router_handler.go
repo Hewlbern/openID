@@ -1,3 +1,5 @@
+//go:build cssstub
+
 package util
 
 // BaseRouterHandler is a placeholder for the Go equivalent of BaseRouterHandler.ts.

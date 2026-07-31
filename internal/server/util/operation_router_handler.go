@@ -1,3 +1,5 @@
+//go:build cssstub
+
 package util
 
 // OperationRouterHandler is a placeholder for the Go equivalent of OperationRouterHandler.ts.

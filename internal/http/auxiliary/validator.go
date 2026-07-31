@@ -1,3 +1,5 @@
+//go:build cssstub
+
 // Package auxiliary provides the Validator interface and base struct.
 package auxiliary
 

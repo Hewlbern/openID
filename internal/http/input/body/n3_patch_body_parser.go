@@ -1,3 +1,5 @@
+//go:build cssstub
+
 // Package body implements a BodyParser that parses N3 Patch documents.
 package body
 

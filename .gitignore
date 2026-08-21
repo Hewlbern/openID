@@ -1,5 +1,7 @@
 data/
 frontend/dist/
+.vercel
+frontend/.vercel
 bin/
 *.log
 /solidgo

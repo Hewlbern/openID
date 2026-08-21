@@ -28,6 +28,18 @@ const config = `(function (g) {
 `;
 writeFileSync(join(dist, "static", "config.js"), config);
 writeFileSync(join(dist, "config.js"), config);
+writeFileSync(join(dist, "vercel.json"), JSON.stringify({
+  rewrites: [
+    { source: "/dashboard", destination: "/dash.html" },
+    { source: "/dashboard/", destination: "/dash.html" },
+    { source: "/welcome", destination: "/index.html" },
+    { source: "/welcome/", destination: "/index.html" },
+    { source: "/app", destination: "/app.html" },
+    { source: "/app/", destination: "/app.html" },
+    { source: "/i/:path*", destination: "/profile.html" },
+    { source: "/login", destination: "/dash.html" },
+  ],
+}, null, 2));
 
 const index = readFileSync(join(dist, "index.html"), "utf8");
 if (!index.includes("config.js")) {

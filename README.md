@@ -39,12 +39,62 @@ cd openID
 go run ./cmd/server -port 3000 -storage ./data
 ```
 
+Open the Solid server dashboard (this is the server console, not the marketing landing):
+
+```
+http://localhost:3000/
+```
+
+Handle-claim landing (separate product page):
+
+```
+http://localhost:3000/welcome
+```
+
 Health check:
 
 ```bash
 curl -s http://localhost:3000/health
 # {"status":"ok"}
 ```
+
+MCP (for Grok Bot / Cursor): `http://localhost:3000/mcp` — also stdio via `go run ./cmd/mcp` with `OPENID_BASE_URL`.
+
+```bash
+curl -s http://localhost:3000/mcp
+# {"open":true,"dashboard":"...","mcp":".../mcp", ...}
+```
+
+Claim a handle:
+
+```bash
+curl -s http://localhost:3000/idp/handles/ada
+curl -s -X POST http://localhost:3000/idp/register \
+  -H 'Content-Type: application/json' \
+  -d '{"handle":"ada","password":"testpass123","name":"Ada"}'
+# Public page: http://localhost:3000/i/ada
+# Passport UI: http://localhost:3000/app
+```
+
+## Hosted deploy
+
+The Solid server is a long-lived Go process with a volume. The marketing UI can sit on Vercel and call that origin.
+
+**Railway (pod origin)**
+
+1. Create a new Railway project from this repo (`Dockerfile` + `railway.toml`).
+2. Attach a volume at `/data`.
+3. Set `SOLID_STORAGE_PATH=/data`, a real `SOLID_TOKEN_SECRET`, and `SOLID_BASE_URL=https://<your-railway-domain>` after the domain exists.
+4. Railway injects `PORT`; the binary already reads it.
+
+**Vercel (frontend)**
+
+```bash
+cd frontend
+OPENID_API=https://<your-railway-domain> vercel --prod
+```
+
+Other operators can run the same split: one SolidGo instance (Railway/Docker) plus a Vercel project whose `OPENID_API` points at their server.
 
 With Docker (server + Kubo IPFS):
 
@@ -117,6 +167,7 @@ When OTS calendars are unreachable, a **pending local proof** is stored and can 
 
 | Endpoint | Purpose |
 |----------|---------|
+| `GET/POST /mcp` | MCP for Grok Bot (open, tools/list, tools/call) |
 | `POST /agents` | Register AI agent (pod + WebID + keys) |
 | `GET /agents` | List agents |
 | `POST /idp/register` | Human account + pod |
@@ -180,7 +231,13 @@ go build -o /tmp/openid ./cmd/server
 BASE_URL=http://localhost:3460 ./test/functional/run.sh
 ```
 
-Covers health, OIDC discovery, register/login, LDP CRUD, ETags/conditions, SPARQL + N3 patch, WAC, client-credentials, AI agent + Ed25519 signatures, audit Merkle/OTS verify, SSE notifications, and CORS.
+Covers health, OIDC discovery, register/login, LDP CRUD, ETags/conditions, SPARQL + N3 patch, WAC, client-credentials, AI agent + Ed25519 signatures, audit Merkle/OTS verify, SSE notifications, CORS, and the grokbot MCP (HTTP + stdio).
+
+```bash
+BASE_URL=http://localhost:3460 ./test/functional/mcp.sh
+```
+
+Grok Bot / Cursor load `.cursor/mcp.json` and `.mcp.json` in this repo (`url: http://127.0.0.1:4000/mcp` when the local pod is on port 4000).
 
 ## Layout
 
@@ -197,7 +254,9 @@ internal/audit/           hash chain + Merkle batches
 internal/ipfs/            Kubo client (+ offline fallback)
 internal/ots/             OpenTimestamps client
 internal/notify/          WebSocket + SSE
+internal/openidmcp/       MCP stdio + HTTP for Grok Bot
 internal/rdf/             Turtle / SPARQL UPDATE / N3-Patch
+cmd/mcp/                  stdio MCP entrypoint
 ```
 
 ## License

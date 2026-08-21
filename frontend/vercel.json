@@ -1,0 +1,14 @@
+{
+  "buildCommand": "node build.mjs",
+  "outputDirectory": "dist",
+  "rewrites": [
+    { "source": "/dashboard", "destination": "/dash.html" },
+    { "source": "/dashboard/", "destination": "/dash.html" },
+    { "source": "/welcome", "destination": "/index.html" },
+    { "source": "/welcome/", "destination": "/index.html" },
+    { "source": "/app", "destination": "/app.html" },
+    { "source": "/app/", "destination": "/app.html" },
+    { "source": "/i/:path*", "destination": "/profile.html" },
+    { "source": "/login", "destination": "/dash.html" }
+  ]
+}

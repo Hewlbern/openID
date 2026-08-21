@@ -26,4 +26,4 @@ EXPOSE 3000
 
 VOLUME ["/data"]
 
-CMD ["solidgo", "-port", "3000", "-storage", "/data"]
+CMD ["sh", "-c", "exec solidgo -port ${PORT:-${SOLID_PORT:-3000}} -storage ${SOLID_STORAGE_PATH:-/data}"]

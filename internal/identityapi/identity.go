@@ -27,18 +27,25 @@ type Service struct {
 	Tokens  *authn.TokenService
 	BaseURL string
 
-	mu       sync.RWMutex
-	accounts map[string]*Account // email -> account
-	clients  map[string]*ClientCredentials
-	sessions map[string]string // cookie -> accountID
+	mu        sync.RWMutex
+	accounts  map[string]*Account // email or "handle:"+handle -> account (emails kept for login)
+	byHandle  map[string]*Account
+	byID      map[string]*Account
+	clients   map[string]*ClientCredentials
+	sessions  map[string]string // cookie -> accountID
+	persistOK bool
 }
 
 type Account struct {
-	ID           string `json:"id"`
-	Email        string `json:"email"`
-	PasswordHash string `json:"-"`
-	WebID        string `json:"webId"`
-	PodPath      string `json:"podPath"`
+	ID           string    `json:"id"`
+	Handle       string    `json:"handle"`
+	Email        string    `json:"email,omitempty"`
+	Name         string    `json:"name,omitempty"`
+	Bio          string    `json:"bio,omitempty"`
+	PasswordHash string    `json:"-"`
+	WebID        string    `json:"webId"`
+	PodPath      string    `json:"podPath"`
+	PublicURL    string    `json:"publicUrl,omitempty"`
 	Created      time.Time `json:"created"`
 }
 
@@ -51,14 +58,19 @@ type ClientCredentials struct {
 }
 
 func New(store *resourcestore.Store, tokens *authn.TokenService, baseURL string) *Service {
-	return &Service{
-		Store:    store,
-		Tokens:   tokens,
-		BaseURL:  strings.TrimRight(baseURL, "/"),
-		accounts: map[string]*Account{},
-		clients:  map[string]*ClientCredentials{},
-		sessions: map[string]string{},
+	s := &Service{
+		Store:     store,
+		Tokens:    tokens,
+		BaseURL:   strings.TrimRight(baseURL, "/"),
+		accounts:  map[string]*Account{},
+		byHandle:  map[string]*Account{},
+		byID:      map[string]*Account{},
+		clients:   map[string]*ClientCredentials{},
+		sessions:  map[string]string{},
+		persistOK: true,
 	}
+	s.load()
+	return s
 }
 
 func (s *Service) Routes(mux *http.ServeMux) {
@@ -66,6 +78,46 @@ func (s *Service) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("/.well-known/openid-configuration", s.handleOIDCConfig)
 	mux.HandleFunc("/.well-known/solid", s.handleSolidDescription)
 	mux.HandleFunc("/oauth/token", s.handleToken)
+	mux.HandleFunc("/api/config", s.handleConfig)
+	mux.HandleFunc("/records/sparql", s.handleRecordsSPARQL)
+}
+
+func (s *Service) handleConfig(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"name":      "OpenID",
+		"baseUrl":   s.BaseURL,
+		"handlePrefix": "/i/",
+		"protocol":  "Solid Protocol",
+	})
+}
+
+func (s *Service) AccountCount() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return len(s.byID)
+}
+
+func (s *Service) FindByHandle(handle string) *Account {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.byHandle[strings.ToLower(handle)]
+}
+
+func (s *Service) PublicAccount(handle string) map[string]interface{} {
+	acc := s.FindByHandle(handle)
+	if acc == nil {
+		return nil
+	}
+	return map[string]interface{}{
+		"handle":    acc.Handle,
+		"name":      acc.Name,
+		"bio":       acc.Bio,
+		"webId":     acc.WebID,
+		"pod":       s.BaseURL + "/" + acc.PodPath,
+		"publicUrl": s.BaseURL + "/i/" + acc.Handle,
+		"created":   acc.Created,
+	}
 }
 
 func (s *Service) handleSolidDescription(w http.ResponseWriter, r *http.Request) {
@@ -97,10 +149,14 @@ func (s *Service) handleOIDCConfig(w http.ResponseWriter, r *http.Request) {
 func (s *Service) handleIDP(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/idp/")
 	switch {
+	case strings.HasPrefix(path, "handles/") && r.Method == http.MethodGet:
+		s.handleAvailability(w, strings.TrimPrefix(path, "handles/"))
 	case path == "register" && r.Method == http.MethodPost:
 		s.register(w, r)
 	case path == "login" && r.Method == http.MethodPost:
 		s.login(w, r)
+	case path == "profile" && r.Method == http.MethodPatch:
+		s.updateProfile(w, r)
 	case path == "logout" && r.Method == http.MethodPost:
 		s.logout(w, r)
 	case path == "accounts/me" && r.Method == http.MethodGet:
@@ -132,10 +188,30 @@ func (s *Service) handleIDP(w http.ResponseWriter, r *http.Request) {
 }
 
 type registerReq struct {
-	Email    string `json:"email"`
-	Password string `json:"password"`
-	Name     string `json:"name"`
-	CreatePod bool  `json:"createPod"`
+	Handle    string `json:"handle"`
+	Email     string `json:"email"`
+	Password  string `json:"password"`
+	Name      string `json:"name"`
+	Bio       string `json:"bio"`
+	CreatePod bool   `json:"createPod"`
+}
+
+var reservedHandles = map[string]bool{
+	"idp": true, "agents": true, "audit": true, "notifications": true,
+	"oauth": true, "health": true, "app": true, "i": true, "static": true,
+	"api": true, "admin": true, "www": true, "well-known": true,
+	"welcome": true, "dashboard": true, "login": true, "mcp": true, "records": true,
+}
+
+func (s *Service) handleAvailability(w http.ResponseWriter, handle string) {
+	handle = sanitizeSlug(strings.Trim(handle, "/"))
+	available := handle != "" && len(handle) >= 2 && !reservedHandles[handle] && s.FindByHandle(handle) == nil
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"handle":    handle,
+		"available": available,
+		"publicUrl": s.BaseURL + "/i/" + handle,
+	})
 }
 
 func (s *Service) register(w http.ResponseWriter, r *http.Request) {
@@ -145,14 +221,31 @@ func (s *Service) register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.Email = strings.ToLower(strings.TrimSpace(req.Email))
-	if req.Email == "" || req.Password == "" {
-		http.Error(w, "email and password required", http.StatusBadRequest)
+	req.Handle = sanitizeSlug(req.Handle)
+	if req.Handle == "" && req.Email != "" {
+		req.Handle = sanitizeSlug(strings.Split(req.Email, "@")[0])
+	}
+	if req.Handle == "" || req.Password == "" {
+		http.Error(w, "handle and password required", http.StatusBadRequest)
 		return
+	}
+	if reservedHandles[req.Handle] {
+		http.Error(w, "handle reserved", http.StatusConflict)
+		return
+	}
+	if req.Name == "" {
+		req.Name = req.Handle
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, ok := s.accounts[req.Email]; ok {
-		http.Error(w, "account exists", http.StatusConflict)
+	if req.Email != "" {
+		if _, ok := s.accounts[req.Email]; ok {
+			http.Error(w, "account exists", http.StatusConflict)
+			return
+		}
+	}
+	if _, ok := s.byHandle[req.Handle]; ok {
+		http.Error(w, "handle taken", http.StatusConflict)
 		return
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
@@ -161,24 +254,28 @@ func (s *Service) register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := uuid.NewString()
-	slug := sanitizeSlug(strings.Split(req.Email, "@")[0])
-	podPath := slug + "/"
+	podPath := req.Handle + "/"
 	webID := s.BaseURL + "/" + podPath + "profile/card#me"
 	acc := &Account{
 		ID:           id,
+		Handle:       req.Handle,
 		Email:        req.Email,
+		Name:         req.Name,
+		Bio:          req.Bio,
 		PasswordHash: string(hash),
 		WebID:        webID,
 		PodPath:      podPath,
+		PublicURL:    s.BaseURL + "/i/" + req.Handle,
 		Created:      time.Now().UTC(),
 	}
-	s.accounts[req.Email] = acc
+	s.indexAccount(acc)
 	if req.CreatePod || true {
 		if err := s.provisionPod(context.Background(), acc, req.Name); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 	}
+	s.saveLocked()
 	token, _ := s.Tokens.Issue(acc.WebID, "", 24*time.Hour)
 	sid := uuid.NewString()
 	s.sessions[sid] = acc.ID
@@ -199,10 +296,16 @@ func (s *Service) provisionPod(ctx context.Context, acc *Account, name string) e
 	if _, err := s.Store.PutContainer(ctx, acc.PodPath+"profile/"); err != nil {
 		return err
 	}
+	if _, err := s.Store.PutContainer(ctx, acc.PodPath+"inbox/"); err != nil {
+		return err
+	}
+	if _, err := s.Store.PutContainer(ctx, acc.PodPath+"public/"); err != nil {
+		return err
+	}
 	if name == "" {
 		name = "Solid User"
 	}
-	profile := webIDProfileTurtle(acc.WebID, name, s.BaseURL+"/"+acc.PodPath)
+	profile := webIDProfileTurtle(acc.WebID, name, s.BaseURL+"/"+acc.PodPath, acc.Handle)
 	if _, err := s.Store.Put(ctx, acc.PodPath+"profile/card", "text/turtle", []byte(profile), "", "*"); err != nil {
 		// allow overwrite
 		_, err = s.Store.Put(ctx, acc.PodPath+"profile/card", "text/turtle", []byte(profile), "", "")
@@ -219,7 +322,7 @@ func (s *Service) provisionPod(ctx context.Context, acc *Account, name string) e
 	return err
 }
 
-func webIDProfileTurtle(webID, name, storage string) string {
+func webIDProfileTurtle(webID, name, storage, handle string) string {
 	g := rdf.NewGraph()
 	prefixes := map[string]string{
 		"foaf":   "http://xmlns.com/foaf/0.1/",
@@ -229,7 +332,11 @@ func webIDProfileTurtle(webID, name, storage string) string {
 	}
 	g.AddIRI(webID, "http://www.w3.org/1999/02/22-rdf-syntax-ns#type", "http://xmlns.com/foaf/0.1/Person")
 	g.AddLiteral(webID, "http://xmlns.com/foaf/0.1/name", name)
+	if handle != "" {
+		g.AddLiteral(webID, "http://xmlns.com/foaf/0.1/nick", handle)
+	}
 	g.AddIRI(webID, "http://www.w3.org/ns/pim/space#storage", storage)
+	g.AddIRI(webID, "http://www.w3.org/ns/ldp#inbox", strings.TrimSuffix(storage, "/")+"/inbox/")
 	issuer := storage
 	if i := strings.Index(strings.TrimPrefix(storage, "https://"), "/"); i >= 0 {
 		// storage is baseURL/pod/ — issuer is baseURL
@@ -259,9 +366,18 @@ func (s *Service) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.mu.RLock()
-	acc, ok := s.accounts[strings.ToLower(req.Email)]
+	var acc *Account
+	if req.Email != "" {
+		acc = s.accounts[strings.ToLower(req.Email)]
+	}
+	if acc == nil && req.Handle != "" {
+		acc = s.byHandle[sanitizeSlug(req.Handle)]
+	}
+	if acc == nil && req.Email != "" {
+		acc = s.byHandle[sanitizeSlug(req.Email)]
+	}
 	s.mu.RUnlock()
-	if !ok || bcrypt.CompareHashAndPassword([]byte(acc.PasswordHash), []byte(req.Password)) != nil {
+	if acc == nil || bcrypt.CompareHashAndPassword([]byte(acc.PasswordHash), []byte(req.Password)) != nil {
 		http.Error(w, "invalid credentials", http.StatusUnauthorized)
 		return
 	}
@@ -286,22 +402,32 @@ func (s *Service) logout(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Service) accountFromRequest(r *http.Request) *Account {
-	c, err := r.Cookie("solid-session")
-	if err != nil {
+	if c, err := r.Cookie("solid-session"); err == nil {
+		s.mu.RLock()
+		id, ok := s.sessions[c.Value]
+		acc := s.byID[id]
+		s.mu.RUnlock()
+		if ok && acc != nil {
+			return acc
+		}
+	}
+	creds, err := s.Tokens.Extract(r)
+	if err != nil || creds.WebID == "" {
 		return nil
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	id, ok := s.sessions[c.Value]
-	if !ok {
-		return nil
+	return s.accountByWebID(creds.WebID)
+}
+
+func (s *Service) indexAccount(acc *Account) {
+	if acc.Email != "" {
+		s.accounts[acc.Email] = acc
 	}
-	for _, a := range s.accounts {
-		if a.ID == id {
-			return a
-		}
+	if acc.Handle != "" {
+		s.byHandle[acc.Handle] = acc
 	}
-	return nil
+	s.byID[acc.ID] = acc
 }
 
 func (s *Service) me(w http.ResponseWriter, r *http.Request) {
@@ -314,18 +440,64 @@ func (s *Service) me(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.mu.RLock()
-		for _, a := range s.accounts {
-			if a.WebID == creds.WebID {
-				acc = a
-				break
-			}
-		}
+		acc = s.accountByWebID(creds.WebID)
 		s.mu.RUnlock()
 	}
 	if acc == nil {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(acc)
+}
+
+func (s *Service) accountByWebID(webID string) *Account {
+	for _, a := range s.byID {
+		if a.WebID == webID {
+			return a
+		}
+	}
+	return nil
+}
+
+func (s *Service) updateProfile(w http.ResponseWriter, r *http.Request) {
+	acc := s.accountFromRequest(r)
+	if acc == nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	var body struct {
+		Name     string `json:"name"`
+		Bio      string `json:"bio"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	if body.Password != "" && len(body.Password) < 8 {
+		http.Error(w, "password must be at least 8 characters", http.StatusBadRequest)
+		return
+	}
+	s.mu.Lock()
+	if body.Name != "" {
+		acc.Name = body.Name
+	}
+	if body.Bio != "" {
+		acc.Bio = body.Bio
+	}
+	if body.Password != "" {
+		hash, err := bcrypt.GenerateFromPassword([]byte(body.Password), bcrypt.DefaultCost)
+		if err != nil {
+			s.mu.Unlock()
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		acc.PasswordHash = string(hash)
+	}
+	s.saveLocked()
+	s.mu.Unlock()
+	_ = s.provisionPod(r.Context(), acc, acc.Name)
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(acc)
 }
@@ -360,12 +532,7 @@ func (s *Service) createClientCredentials(w http.ResponseWriter, r *http.Request
 			return
 		}
 		s.mu.RLock()
-		for _, a := range s.accounts {
-			if a.WebID == creds.WebID {
-				acc = a
-				break
-			}
-		}
+		acc = s.accountByWebID(creds.WebID)
 		s.mu.RUnlock()
 	}
 	if acc == nil {
@@ -384,6 +551,7 @@ func (s *Service) createClientCredentials(w http.ResponseWriter, r *http.Request
 	cc := &ClientCredentials{ID: id, Secret: secret, WebID: acc.WebID, AccountID: acc.ID, Name: body.Name}
 	s.mu.Lock()
 	s.clients[id] = cc
+	s.saveLocked()
 	s.mu.Unlock()
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(cc)
@@ -473,11 +641,78 @@ func sanitizeSlug(s string) string {
 			b.WriteRune(r)
 		}
 	}
-	out := b.String()
-	if out == "" {
-		out = "pod-" + randomHex(4)
+	return b.String()
+}
+
+type persistedState struct {
+	Accounts []persistedAccount     `json:"accounts"`
+	Clients  []*ClientCredentials   `json:"clients"`
+}
+
+type persistedAccount struct {
+	ID           string    `json:"id"`
+	Handle       string    `json:"handle"`
+	Email        string    `json:"email"`
+	Name         string    `json:"name"`
+	Bio          string    `json:"bio"`
+	PasswordHash string    `json:"passwordHash"`
+	WebID        string    `json:"webId"`
+	PodPath      string    `json:"podPath"`
+	PublicURL    string    `json:"publicUrl"`
+	Created      time.Time `json:"created"`
+}
+
+func (s *Service) load() {
+	raw, err := s.Store.Get(context.Background(), ".openid/accounts.json")
+	if err != nil || raw == nil || len(raw.Body) == 0 {
+		return
 	}
-	return out
+	var st persistedState
+	if err := json.Unmarshal(raw.Body, &st); err != nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, p := range st.Accounts {
+		acc := &Account{
+			ID: p.ID, Handle: p.Handle, Email: p.Email, Name: p.Name, Bio: p.Bio,
+			PasswordHash: p.PasswordHash, WebID: p.WebID, PodPath: p.PodPath,
+			PublicURL: p.PublicURL, Created: p.Created,
+		}
+		s.indexAccount(acc)
+	}
+	for _, c := range st.Clients {
+		if c != nil && c.ID != "" {
+			s.clients[c.ID] = c
+		}
+	}
+}
+
+func (s *Service) saveLocked() {
+	if !s.persistOK {
+		return
+	}
+	st := persistedState{}
+	seen := map[string]bool{}
+	for _, a := range s.byID {
+		if seen[a.ID] {
+			continue
+		}
+		seen[a.ID] = true
+		st.Accounts = append(st.Accounts, persistedAccount{
+			ID: a.ID, Handle: a.Handle, Email: a.Email, Name: a.Name, Bio: a.Bio,
+			PasswordHash: a.PasswordHash, WebID: a.WebID, PodPath: a.PodPath,
+			PublicURL: a.PublicURL, Created: a.Created,
+		})
+	}
+	for _, c := range s.clients {
+		st.Clients = append(st.Clients, c)
+	}
+	raw, err := json.MarshalIndent(st, "", "  ")
+	if err != nil {
+		return
+	}
+	_, _ = s.Store.Put(context.Background(), ".openid/accounts.json", "application/json", raw, "", "")
 }
 
 func randomHex(n int) string {

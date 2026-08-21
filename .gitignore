@@ -1,7 +1,11 @@
 data/
+frontend/dist/
+bin/
 *.log
 /solidgo
 /solid-go
+/openid
+/openid-mcp
 .DS_Store
 coverage.out
 *.test

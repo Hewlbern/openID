@@ -64,6 +64,12 @@ type registerResponse struct {
 	Token      string `json:"token"`
 }
 
+func (r *Registry) Count() int {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return len(r.agents)
+}
+
 func (r *Registry) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("/agents", r.handleAgents)
 	mux.HandleFunc("/agents/", r.handleAgentByID)

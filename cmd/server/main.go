@@ -17,7 +17,7 @@ import (
 func main() {
 	logger := logging.NewBasicLogger(logging.Info)
 
-	port := flag.Int("port", envInt("SOLID_PORT", 3000), "Port to listen on")
+	port := flag.Int("port", envInt("SOLID_PORT", envInt("PORT", 3000)), "Port to listen on")
 	https := flag.Bool("https", false, "Use HTTPS")
 	certFile := flag.String("cert", "", "Path to TLS certificate file")
 	keyFile := flag.String("key", "", "Path to TLS private key file")

@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>OpenID — Solid server</title>
+  <meta name="description" content="Open-source Solid Protocol server dashboard: browse pods, manage identity, agents, and audit." />
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="/static/dash.css" />
+  <script src="/static/config.js"></script>
+</head>
+<body>
+  <header class="top">
+    <a class="brand" href="/">
+      <span class="glyph" aria-hidden="true"></span>
+      <span>
+        <strong>OpenID</strong>
+        <small>Solid server</small>
+      </span>
+    </a>
+    <div class="top-meta">
+      <span class="pill" id="healthPill">…</span>
+      <span class="mono" id="baseLabel"></span>
+      <a href="/records">Records</a>
+      <a href="/welcome">Landing</a>
+      <a href="https://github.com/Hewlbern/openID">GitHub</a>
+    </div>
+  </header>
+
+  <nav class="tabs" id="tabs">
+    <button type="button" data-tab="overview" class="on">Overview</button>
+    <button type="button" data-tab="browser">Browser</button>
+    <button type="button" data-tab="identity">Identity</button>
+    <button type="button" data-tab="agents">Agents</button>
+    <button type="button" data-tab="audit">Audit</button>
+  </nav>
+
+  <main>
+    <section id="overview" class="pane on">
+      <div class="grid">
+        <article class="card">
+          <h2>This instance</h2>
+          <dl id="statusList" class="kv"></dl>
+        </article>
+        <article class="card">
+          <h2>Discovery</h2>
+          <ul class="links" id="disco"></ul>
+        </article>
+      </div>
+      <article class="card">
+        <h2>Quick start</h2>
+        <pre class="code">go run ./cmd/server -port 4000 -storage ./data
+
+curl -s http://localhost:4000/health
+curl -s -H 'Accept: text/turtle' http://localhost:4000/mike/
+curl -s -X PUT http://localhost:4000/mike/public/note.txt \
+  -H "Authorization: Bearer $TOKEN" -d 'hello'</pre>
+      </article>
+    </section>
+
+    <section id="browser" class="pane">
+      <article class="card">
+        <h2>LDP browser</h2>
+        <p class="hint">GET any pod path. Authenticated writes use your session token.</p>
+        <form id="browseForm" class="row">
+          <input id="resPath" value="/" spellcheck="false" aria-label="Resource path" />
+          <button class="btn" type="submit">GET</button>
+        </form>
+        <div id="children" class="chips"></div>
+        <div class="meta mono" id="resMeta"></div>
+        <pre class="code body" id="resBody"></pre>
+        <form id="putForm" class="stack">
+          <label>PUT body</label>
+          <textarea id="putBody" rows="6" placeholder="resource contents"></textarea>
+          <div class="row">
+            <input id="putType" value="text/plain" aria-label="Content type" />
+            <button class="btn" type="submit">PUT</button>
+          </div>
+        </form>
+        <p class="msg" id="browseMsg"></p>
+      </article>
+    </section>
+
+    <section id="identity" class="pane">
+      <div class="grid">
+        <article class="card" id="sessionCard">
+          <h2>Session</h2>
+          <p id="who">Not signed in.</p>
+          <p class="mono" id="webid"></p>
+          <div class="row wrap" id="sessionActions"></div>
+        </article>
+        <article class="card">
+          <h2>Sign in</h2>
+          <form id="loginForm" class="stack">
+            <label>Handle or email</label>
+            <input name="id" required placeholder="mike" />
+            <label>Password</label>
+            <input name="password" type="password" required />
+            <button class="btn" type="submit">Log in</button>
+          </form>
+        </article>
+        <article class="card">
+          <h2>Create account + pod</h2>
+          <form id="registerForm" class="stack">
+            <label>Handle</label>
+            <input name="handle" required placeholder="ada" />
+            <label>Name</label>
+            <input name="name" placeholder="Ada Lovelace" />
+            <label>Password</label>
+            <input name="password" type="password" required minlength="8" />
+            <button class="btn" type="submit">Register</button>
+          </form>
+        </article>
+      </div>
+    </section>
+
+    <section id="agents" class="pane">
+      <article class="card">
+        <h2>AI agents</h2>
+        <form id="agentForm" class="row">
+          <input name="name" placeholder="Agent name" value="grokbot" />
+          <button class="btn" type="submit">Issue agent</button>
+        </form>
+        <pre class="code" id="agentSecret"></pre>
+        <div id="agentList" class="table"></div>
+      </article>
+    </section>
+
+    <section id="audit" class="pane">
+      <article class="card">
+        <h2>Audit trail</h2>
+        <p class="hint">Mutating LDP requests are hashed, optionally pinned to IPFS, Merkle-batched, and stamped with OpenTimestamps.</p>
+        <button class="btn ghost" id="flush" type="button">Flush Merkle + OTS batch</button>
+        <div id="auditList" class="table"></div>
+      </article>
+    </section>
+  </main>
+
+  <footer class="foot">
+    Apache-2.0 · <a href="https://github.com/Hewlbern/openID">Hewlbern/openID</a>
+    · Solid Protocol server in Go
+  </footer>
+  <script src="/static/dash.js"></script>
+</body>
+</html>

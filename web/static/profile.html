@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>OpenID</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="/static/styles.css" />
+  <script src="/static/config.js"></script>
+</head>
+<body>
+  <div class="wrap">
+    <header class="nav">
+      <a class="brand" href="/">
+        <span class="dots" aria-hidden="true"><i></i><i></i></span>
+        OPENID
+      </a>
+      <div class="nav-right">
+        <a href="/">Claim a handle</a>
+      </div>
+    </header>
+    <main class="profile-page">
+      <div class="avatar" id="avatar">?</div>
+      <h1 id="name">…</h1>
+      <p class="mono" id="handle"></p>
+      <p id="bio" class="lede"></p>
+      <p class="mono" id="webid"></p>
+      <p><a id="pod" href="#">Solid pod →</a></p>
+    </main>
+  </div>
+  <script>
+    const handle = location.pathname.replace(/^\/i\//, "").replace(/\/$/, "");
+    fetch(openidURL("/i/" + encodeURIComponent(handle)), { headers: { Accept: "application/json" } })
+      .then((r) => { if (!r.ok) throw r; return r.json(); })
+      .then((p) => {
+        document.title = (p.name || p.handle) + " — OpenID";
+        document.getElementById("name").textContent = p.name || p.handle;
+        document.getElementById("handle").textContent = "/i/" + p.handle;
+        document.getElementById("bio").textContent = p.bio || "This Solid identity is still being written.";
+        document.getElementById("webid").textContent = p.webId;
+        document.getElementById("pod").href = p.pod;
+        document.getElementById("avatar").textContent = (p.name || p.handle || "?").slice(0, 1).toUpperCase();
+      })
+      .catch(() => {
+        document.getElementById("name").textContent = "Handle not claimed";
+        document.getElementById("bio").textContent = "This /i/ page does not exist yet.";
+      });
+  </script>
+</body>
+</html>

@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>OpenID — Records</title>
+  <meta name="description" content="Private archive of Grok Bot and Cursor traces on your Solid pod." />
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="/static/dash.css" />
+  <script src="/static/config.js"></script>
+</head>
+<body>
+  <header class="top records-top">
+    <a class="brand" href="/">
+      <span class="glyph" aria-hidden="true"></span>
+      <span>
+        <strong>OpenID</strong>
+        <small>Records</small>
+      </span>
+    </a>
+    <form id="sparqlForm" class="sparql-bar" hidden>
+      <label class="sr-only" for="sparql">SPARQL</label>
+      <input id="sparql" type="search" autocomplete="off" spellcheck="false"
+        placeholder='SPARQL or keywords — e.g. implementation  or  SELECT ?name ?workType WHERE { ?s oid:workType ?workType ; schema:name ?name }'
+        aria-label="SPARQL query" />
+      <button class="btn" type="submit">Query</button>
+    </form>
+    <div class="top-meta">
+      <span class="pill" id="privacyPill">owner only</span>
+      <a href="/">Server</a>
+      <a href="/app">Passport</a>
+    </div>
+  </header>
+
+  <main class="records-main">
+    <section id="gate" class="card gate">
+      <p class="eyebrow">Private archive</p>
+      <h1>Your records</h1>
+      <p class="lede">Grok Bot settings and every Cursor trace, stored on your Solid pod. Sign in to open them.</p>
+      <form id="loginForm" class="stack" style="max-width:360px">
+        <label>Handle</label>
+        <input name="handle" required value="mike" autocomplete="username" />
+        <label>Password</label>
+        <input name="password" type="password" required autocomplete="current-password" />
+        <button class="btn" type="submit">Open records</button>
+      </form>
+      <p class="msg" id="gateMsg"></p>
+    </section>
+
+    <section id="archive" hidden>
+      <header class="records-hero">
+        <div>
+          <p class="eyebrow">Private archive</p>
+          <h1>Records</h1>
+          <p class="lede" id="whoLine">Signed in</p>
+        </div>
+        <div class="row wrap">
+          <a class="btn ghost" href="/mike/records/catalog.jsonld" id="rawLink">JSON-LD catalog</a>
+          <a class="btn ghost" href="/mike/records/catalog.ttl">RDF</a>
+          <button class="btn ghost" id="logout" type="button">Log out</button>
+        </div>
+      </header>
+
+      <div class="stats" id="stats"></div>
+
+      <article class="card sparql-card" id="sparqlCard" hidden>
+        <div class="records-toolbar">
+          <h2>SPARQL</h2>
+          <span class="hint" id="sparqlMeta"></span>
+        </div>
+        <p class="hint">Prefixes <span class="mono">oid:</span>, <span class="mono">schema:</span>, <span class="mono">dcat:</span>, <span class="mono">dct:</span> are already bound. Plain text becomes a CONTAINS filter.</p>
+        <div class="chips" id="sparqlExamples"></div>
+        <details id="sparqlDetails">
+          <summary>Query sent</summary>
+          <pre class="code" id="sparqlSent"></pre>
+        </details>
+        <div class="sparql-results" id="sparqlResults"></div>
+      </article>
+
+      <div class="grid records-grid">
+        <article class="card">
+          <h2>Grok Bot</h2>
+          <dl class="kv" id="grokKV"></dl>
+        </article>
+        <article class="card">
+          <h2>This pod</h2>
+          <dl class="kv" id="podKV"></dl>
+          <form id="pwForm" class="stack" style="margin-top:14px">
+            <label>Set a new password</label>
+            <input name="password" type="password" required minlength="8" placeholder="at least 8 characters" />
+            <button class="btn ghost" type="submit">Save password</button>
+            <p class="msg" id="pwMsg"></p>
+          </form>
+        </article>
+      </div>
+
+      <article class="card">
+        <div class="records-toolbar">
+          <h2>Traces</h2>
+          <p class="hint" id="traceMeta"></p>
+        </div>
+        <p class="hint">Work type</p>
+        <div class="chips" id="workTypes"></div>
+        <p class="hint">Domain</p>
+        <div class="chips" id="domains"></div>
+        <p class="hint">Package</p>
+        <div class="chips" id="packages"></div>
+        <div class="table traces" id="traceList"></div>
+      </article>
+
+      <article class="card" id="detailCard" hidden>
+        <h2 id="detailTitle">Trace</h2>
+        <dl class="kv" id="detailKV"></dl>
+        <p class="lede" id="detailQuery"></p>
+        <p class="mono" id="detailPath"></p>
+      </article>
+    </section>
+  </main>
+
+  <footer class="foot">
+    Stored at <span class="mono">/mike/records/</span> · owner-only ACL · live secrets redacted
+  </footer>
+  <script src="/static/records.js"></script>
+</body>
+</html>

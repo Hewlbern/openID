@@ -101,10 +101,9 @@ func (c *Checker) EffectiveModes(ctx context.Context, resourcePath, agentWebID s
 		if err != nil {
 			continue
 		}
+		// Nearest existing ACL is authoritative, including an empty grant (deny).
 		modes := evaluateACL(g, resourcePath, agentWebID, aclPath == candidates[0])
-		if modes.Read || modes.Write || modes.Append || modes.Control {
-			return modes, nil
-		}
+		return modes, nil
 	}
 	// Default: public read on root for bootstrap; otherwise deny
 	if path == "" || path == "/" {

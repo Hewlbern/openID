@@ -16,11 +16,13 @@ import (
 	"solid-go/internal/ipfs"
 	"solid-go/internal/logging"
 	"solid-go/internal/notify"
+	"solid-go/internal/openidmcp"
 	"solid-go/internal/ots"
 	"solid-go/internal/resourcestore"
 	"solid-go/internal/solid"
 	"solid-go/internal/storage"
 	"solid-go/internal/wac"
+	"solid-go/web"
 )
 
 // ServerOptions configures the Solid server.
@@ -107,29 +109,55 @@ func NewServer(opts *ServerOptions) *Server {
 		},
 	}
 
+	site := web.New(idp, opts.BaseURL)
+
 	root := http.NewServeMux()
 	root.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	})
+	root.HandleFunc("/api/status", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"name":        "OpenID",
+			"product":     "SolidGo",
+			"version":     "1.0.0",
+			"status":      "ok",
+			"protocol":    "Solid Protocol",
+			"baseUrl":     opts.BaseURL,
+			"storagePath": opts.StoragePath,
+			"accounts":    idp.AccountCount(),
+			"agents":      agents.Count(),
+			"endpoints": map[string]string{
+				"idp":           opts.BaseURL + "/idp/",
+				"oidc":          opts.BaseURL + "/.well-known/openid-configuration",
+				"solid":         opts.BaseURL + "/.well-known/solid",
+				"agents":        opts.BaseURL + "/agents",
+				"audit":         opts.BaseURL + "/audit/events/",
+				"notifications": opts.BaseURL + "/notifications/",
+				"dashboard":     opts.BaseURL + "/",
+				"welcome":       opts.BaseURL + "/welcome",
+				"mcp":           opts.BaseURL + "/mcp",
+				"records":       opts.BaseURL + "/records",
+				"sparql":        opts.BaseURL + "/records/sparql",
+			},
+		})
+	})
+	mcp := openidmcp.New(opts.BaseURL)
+	root.Handle("/mcp", mcp.Handler())
+	root.Handle("/mcp/", mcp.Handler())
 	idp.Routes(root)
 	agents.Routes(root)
 	auditLog.Routes(root)
 	hub.Routes(root)
+	site.Routes(root)
 	root.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/" {
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]interface{}{
-				"name":          "OpenID",
-				"product":       "SolidGo",
-				"version":       "1.0.0",
-				"protocol":      "Solid Protocol",
-				"baseUrl":       opts.BaseURL,
-				"idp":           opts.BaseURL + "/idp/",
-				"agents":        opts.BaseURL + "/agents",
-				"audit":         opts.BaseURL + "/audit/events/",
-				"notifications": opts.BaseURL + "/notifications/",
-			})
+			if web.WantsHTML(r) || r.URL.Query().Get("format") == "html" {
+				site.ServeDashboard(w, r)
+				return
+			}
+			http.Redirect(w, r, "/api/status", http.StatusFound)
 			return
 		}
 		ldp.ServeHTTP(w, r)
@@ -213,7 +241,14 @@ func corsMiddleware(next http.Handler) http.Handler {
 			strings.HasPrefix(r.URL.Path, "/oauth") ||
 			strings.HasPrefix(r.URL.Path, "/notifications") ||
 			strings.HasPrefix(r.URL.Path, "/.well-known") ||
-			r.URL.Path == "/health") {
+			strings.HasPrefix(r.URL.Path, "/api") ||
+			strings.HasPrefix(r.URL.Path, "/app") ||
+			strings.HasPrefix(r.URL.Path, "/welcome") ||
+			strings.HasPrefix(r.URL.Path, "/dashboard") ||
+			strings.HasPrefix(r.URL.Path, "/i/") ||
+			strings.HasPrefix(r.URL.Path, "/mcp") ||
+			strings.HasPrefix(r.URL.Path, "/records") ||
+			r.URL.Path == "/health" || r.URL.Path == "/api/status") {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}

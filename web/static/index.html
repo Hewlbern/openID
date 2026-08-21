@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>OpenID — Solid identity for you and your agents</title>
+  <meta name="description" content="Claim your handle and create a Solid passport: one identity layer for every AI you allow." />
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="/static/styles.css" />
+  <script src="/static/config.js"></script>
+</head>
+<body>
+  <div class="lp">
+    <header class="nav">
+      <a class="brand" href="/">
+        <span class="glyph" aria-hidden="true"></span>
+        OPENID
+      </a>
+      <div class="nav-right">
+        <a href="/">server</a>
+        <a href="#feed">learn more</a>
+        <button class="login" id="loginBtn" type="button">LOGIN</button>
+      </div>
+    </header>
+
+    <section class="hero">
+      <div class="backed">Built on <span class="yc-ish">Solid Protocol</span></div>
+      <h1 class="display">MAKE IT ALL ABOUT</h1>
+      <div class="you-pill">YOU</div>
+      <p class="lede">Carry your preferences, work, relationships, and identity across AI applications without starting over every time. Private by default, yours for life.</p>
+      <div class="claim-label">claim your handle ↓</div>
+      <form class="claim" id="claimForm">
+        <span class="prefix" data-prefix>openid/i/</span>
+        <input id="handle" name="handle" autocomplete="off" spellcheck="false" placeholder="YOUR NAME" aria-label="Choose your OpenID handle" />
+        <button class="go" id="claimBtn" type="submit" disabled aria-label="Claim this handle">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 12 L12 4 M6 4 H12 V10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+      </form>
+      <div class="status" id="claimStatus"></div>
+
+      <div class="fan" aria-hidden="true">
+        <article class="pcard c1">
+          <h3>Juno Kade</h3>
+          <p>Electronic producer bending broken rhythms and neon synths into late-night dance music.</p>
+          <div class="pills"><span>Spotify</span><span>Bandcamp</span><span>SoundCloud</span><span>Resident Advisor</span></div>
+        </article>
+        <article class="pcard c2">
+          <div class="face sage">D</div>
+          <h3>David K.</h3>
+          <p>Aspiring skater with a taste for cooking and a clean WebID.</p>
+          <div class="pills light"><span>Personal site</span><span>University</span><span>Twitter</span><span>Instagram</span></div>
+        </article>
+        <article class="pcard c3">
+          <span class="mark"></span>
+          <canvas class="passport-orb" id="orb" width="520" height="420"></canvas>
+          <div class="pass-name">YOUR NAME</div>
+          <div class="pass-sub">AI PASSPORT</div>
+        </article>
+        <article class="pcard c4">
+          <div class="face cream">E</div>
+          <h3>Erin Meryl</h3>
+          <p>Curiosity-maxxing. Essays, videos, and a Solid inbox.</p>
+          <div class="mini-feed">
+            <strong>Feed my pod</strong>
+            <div class="tags"><i>Essays</i><i>Videos</i></div>
+          </div>
+        </article>
+        <article class="pcard c5">
+          <h3>Theo M.</h3>
+          <p>Essayist working the seam between memory and place.</p>
+          <div class="essay">
+            <h4>On writing</h4>
+            <p>An essay is a way of thinking out loud until the thought becomes honest.</p>
+            <h4>Selected essays</h4>
+            <u>Cities after rain</u>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section class="feed" id="feed">
+      <div class="phone-wrap">
+        <div class="phone">
+          <div class="notch"></div>
+          <div class="face dark">A</div>
+          <h3>Ada Lovelace</h3>
+          <div class="at">@ada</div>
+          <p>Notes on the analytical engine, agents, and a pod that travels.</p>
+          <div class="phone-links"><span>Essays</span><span>Videos</span><span>Links</span></div>
+        </div>
+        <div class="float-card">
+          <strong>Feed my pod</strong>
+          <div class="pills light tight"><span>Essays</span><span>Videos</span><span>Curiosity</span></div>
+          <em>Add to my library →</em>
+        </div>
+      </div>
+      <div class="feed-copy">
+        <h2 class="display sm">FEED YOUR <span class="word-pill tilt">POD</span></h2>
+        <p>Want a public page too? You’ll get a site at <b class="host-url">/i/you</b> where you can share interests and links, and people can send things to your inbox if you wish. Think of it as a better, free Linktree — except the data is Solid.</p>
+        <p>Send it essays, videos, links, and half-formed thoughts. Everything you feed it becomes part of an identity that travels with you.</p>
+        <div class="stack">
+          <div class="sheet"></div>
+          <div class="sheet"></div>
+          <div class="sheet">
+            <div class="tag">Essay</div>
+            <h4>How agents keep receipts</h4>
+            <p>Each mutating action is hashed, pinned to IPFS, and stamped with OpenTimestamps.</p>
+            <div class="actions">
+              <span class="black">＋ Add to public page</span>
+              <span class="ghost">＋ Add to private list</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="turn">
+      <h2 class="display sm">TURN YOUR POD INTO AN</h2>
+      <div class="word-pill tilt lg">AI PASSPORT</div>
+      <div class="constellation">
+        <svg viewBox="0 0 720 300" aria-hidden="true">
+          <path d="M360 28 L360 118" />
+          <path d="M360 272 L360 182" />
+          <path d="M118 78 Q200 150 248 150" />
+          <path d="M118 222 Q200 150 248 150" />
+          <path d="M602 78 Q520 150 472 150" />
+          <path d="M602 222 Q520 150 472 150" />
+        </svg>
+        <span class="node n-knowledge">Knowledge</span>
+        <span class="node n-goals">Goals</span>
+        <span class="node n-pref">Preferences</span>
+        <span class="node n-taste">Taste</span>
+        <span class="node n-buy">Purchases</span>
+        <span class="node n-apps">Apps</span>
+        <button class="passport-cta" id="passportCta" type="button">
+          <span class="glyph invert"></span>
+          Log in with AI Passport
+        </button>
+      </div>
+      <p class="fade-line">SO YOU NEVER HAVE TO START FROM SCRATCH</p>
+    </section>
+
+    <section class="apps">
+      <h2 class="display sm">CONTROL WHAT APPS KNOW ABOUT YOU</h2>
+      <p class="sub">Your OpenID travels with you, and you decide exactly what every application gets to see.</p>
+      <div class="app-rows">
+        <div class="app-row">
+          <span class="tile empty"></span>
+          <span class="tile"><i class="ic orange"></i></span>
+          <span class="tile empty"></span>
+          <span class="tile"><i class="ic blue"></i></span>
+          <span class="tile"><i class="ic gradient"></i></span>
+          <span class="tile empty"></span>
+          <span class="tile"><i class="ic orange"></i></span>
+        </div>
+        <div class="app-row shift">
+          <span class="tile"><i class="ic black"></i></span>
+          <span class="tile empty"></span>
+          <span class="tile"><i class="ic g"></i></span>
+          <span class="tile"><i class="ic in"></i></span>
+          <span class="tile empty"></span>
+          <span class="tile"><i class="ic sun"></i></span>
+          <span class="tile empty"></span>
+        </div>
+      </div>
+    </section>
+
+    <section class="faq-wrap">
+      <h2 class="display sm">FREQUENTLY ASKED QUESTIONS</h2>
+      <p class="sub">Everything you need to know about your handle and Solid passport.</p>
+      <div class="faq">
+        <details>
+          <summary>What does the AI passport actually do?</summary>
+          <p>It gives you a Solid WebID, a personal pod, and machine-readable access control so AI apps can use your context only with permission.</p>
+        </details>
+        <details>
+          <summary>What can apps actually see?</summary>
+          <p>Only what your ACL grants. Public read is limited to the profile and anything you put in /public. Writes need a token, DPoP proof, or an agent signature.</p>
+        </details>
+        <details>
+          <summary>Where does my data live?</summary>
+          <p>On this Solid server, in your pod. Audit events can also be pinned to IPFS and anchored on Bitcoin calendars via OpenTimestamps.</p>
+        </details>
+        <details>
+          <summary>Is this another social network?</summary>
+          <p>No. You can publish a page, but the product is a pod you control — not a feed you owe anyone.</p>
+        </details>
+        <details>
+          <summary>What does it cost?</summary>
+          <p>This community server is free to try. You can also run the Go binary yourself and keep the keys.</p>
+        </details>
+        <details>
+          <summary>Can my agent or company use this?</summary>
+          <p>Yes. Register an agent, issue client credentials, or sign requests with Ed25519. The API is Solid LDP plus a thin identity layer.</p>
+        </details>
+        <details>
+          <summary>Where does the AI run?</summary>
+          <p>It doesn’t. OpenID is the identity and storage layer. Your agents and apps run wherever you already run them.</p>
+        </details>
+      </div>
+    </section>
+
+    <section class="closing">
+      <h1 class="display">MAKE IT ALL ABOUT</h1>
+      <div class="you-pill">YOU</div>
+      <p class="lede">Carry your preferences, work, relationships, and identity across AI applications without starting over every time. Private by default, yours for life.</p>
+      <div class="claim-label">claim your handle ↓</div>
+      <form class="claim" id="claimForm2">
+        <span class="prefix" data-prefix>openid/i/</span>
+        <input id="handle2" autocomplete="off" spellcheck="false" placeholder="YOUR NAME" aria-label="Choose your OpenID handle" />
+        <button class="go" id="claimBtn2" type="submit" disabled aria-label="Claim this handle">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 12 L12 4 M6 4 H12 V10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+      </form>
+      <div class="status" id="claimStatus2"></div>
+    </section>
+
+    <footer class="footer">
+      <a href="/">© OpenID 2026</a>
+      <div class="footer-links">
+        <a href="https://github.com/Hewlbern/openID">Documentation</a>
+        <a href="/.well-known/openid-configuration">OIDC</a>
+        <a href="/health">Trust</a>
+      </div>
+    </footer>
+  </div>
+
+  <div class="modal-bg" id="claimModal">
+    <form class="modal" id="registerForm">
+      <h3>Claim <span id="modalHandle">you</span></h3>
+      <p>Create a password for your Solid pod. You can add an email later.</p>
+      <div class="field"><label>Display name</label><input name="name" required /></div>
+      <div class="field"><label>Password</label><input name="password" type="password" required minlength="8" /></div>
+      <div class="field"><label>Email (optional)</label><input name="email" type="email" /></div>
+      <button class="btn wide" type="submit">Create my passport</button>
+    </form>
+  </div>
+
+  <div class="modal-bg" id="loginModal">
+    <form class="modal" id="loginForm">
+      <h3>Welcome back</h3>
+      <p>Sign in with your handle or email.</p>
+      <div class="field"><label>Handle or email</label><input name="id" required /></div>
+      <div class="field"><label>Password</label><input name="password" type="password" required /></div>
+      <button class="btn wide" type="submit">Log in</button>
+    </form>
+  </div>
+  <script src="/static/site.js"></script>
+</body>
+</html>

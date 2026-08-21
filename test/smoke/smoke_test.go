@@ -47,6 +47,61 @@ func TestSolidAgentAuditSmoke(t *testing.T) {
 		t.Fatalf("health %d", resp.StatusCode)
 	}
 
+	htmlReq, _ := http.NewRequest(http.MethodGet, ts.URL+"/", nil)
+	htmlReq.Header.Set("Accept", "text/html")
+	htmlResp, err := http.DefaultClient.Do(htmlReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	htmlBody, _ := io.ReadAll(htmlResp.Body)
+	htmlResp.Body.Close()
+	if htmlResp.StatusCode != 200 || !bytes.Contains(htmlBody, []byte("Solid server")) {
+		t.Fatalf("dashboard missing: %d %s", htmlResp.StatusCode, htmlBody[:min(200, len(htmlBody))])
+	}
+
+	recReq, _ := http.NewRequest(http.MethodGet, ts.URL+"/records", nil)
+	recReq.Header.Set("Accept", "text/html")
+	recResp, err := http.DefaultClient.Do(recReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recBody, _ := io.ReadAll(recResp.Body)
+	recResp.Body.Close()
+	if recResp.StatusCode != 200 || !bytes.Contains(recBody, []byte("Your records")) {
+		t.Fatalf("records UI missing: %d %s", recResp.StatusCode, recBody[:min(200, len(recBody))])
+	}
+
+	welcomeReq, _ := http.NewRequest(http.MethodGet, ts.URL+"/welcome", nil)
+	welcomeReq.Header.Set("Accept", "text/html")
+	welcomeResp, err := http.DefaultClient.Do(welcomeReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	welcomeBody, _ := io.ReadAll(welcomeResp.Body)
+	welcomeResp.Body.Close()
+	if welcomeResp.StatusCode != 200 || !bytes.Contains(welcomeBody, []byte("Claim this handle")) {
+		t.Fatalf("landing page missing claim UI: %d %s", welcomeResp.StatusCode, welcomeBody[:min(200, len(welcomeBody))])
+	}
+
+	mcpResp, err := http.Get(ts.URL + "/mcp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mcpBody, _ := io.ReadAll(mcpResp.Body)
+	mcpResp.Body.Close()
+	if mcpResp.StatusCode != 200 || !bytes.Contains(mcpBody, []byte(`"open"`)) {
+		t.Fatalf("mcp openable: %d %s", mcpResp.StatusCode, mcpBody)
+	}
+	mcpCall, err := http.Post(ts.URL+"/mcp", "application/json", bytes.NewBufferString(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"openid_status","arguments":{}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	mcpCallBody, _ := io.ReadAll(mcpCall.Body)
+	mcpCall.Body.Close()
+	if mcpCall.StatusCode != 200 || !bytes.Contains(mcpCallBody, []byte("ok")) {
+		t.Fatalf("mcp status tool: %d %s", mcpCall.StatusCode, mcpCallBody)
+	}
+
 	aresp, err := http.Post(ts.URL+"/agents", "application/json", bytes.NewBufferString(`{"name":"SmokeBot"}`))
 	if err != nil {
 		t.Fatal(err)

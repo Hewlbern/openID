@@ -18,6 +18,7 @@ import (
 	"solid-go/internal/notify"
 	"solid-go/internal/openidmcp"
 	"solid-go/internal/ots"
+	"solid-go/internal/replica"
 	"solid-go/internal/resourcestore"
 	"solid-go/internal/solid"
 	"solid-go/internal/storage"
@@ -39,6 +40,10 @@ type ServerOptions struct {
 	IPFSAPI         string
 	OTSCalendars    []string
 	AuditBatchEvery time.Duration
+	SyncPeer        string
+	SyncHandle      string
+	SyncPassword    string
+	SyncInterval    time.Duration
 }
 
 // Server is the SolidGo HTTP server facade.
@@ -80,6 +85,23 @@ func NewServer(opts *ServerOptions) *Server {
 	}
 	if v := os.Getenv("OTS_CALENDAR"); v != "" {
 		opts.OTSCalendars = strings.Split(v, ",")
+	}
+	if v := os.Getenv("SOLID_SYNC_PEER"); v != "" {
+		opts.SyncPeer = strings.TrimRight(v, "/")
+	}
+	if v := os.Getenv("SOLID_SYNC_HANDLE"); v != "" {
+		opts.SyncHandle = v
+	}
+	if v := os.Getenv("SOLID_SYNC_PASSWORD"); v != "" {
+		opts.SyncPassword = v
+	}
+	if v := os.Getenv("SOLID_SYNC_INTERVAL"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			opts.SyncInterval = d
+		}
+	}
+	if opts.SyncInterval == 0 {
+		opts.SyncInterval = 2 * time.Minute
 	}
 
 	rs := resourcestore.New(opts.Storage, opts.StoragePath)
@@ -184,6 +206,88 @@ func (s *Server) bootstrap(ctx context.Context) {
 	_, _ = s.store.Put(ctx, ".acl", "text/turtle", []byte(rootACL), "", "")
 	_ = s.store.EnsureContainer(ctx, "audit/")
 	s.audit.Start(ctx)
+	s.startReplica(ctx)
+}
+
+func (s *Server) startReplica(ctx context.Context) {
+	peer := strings.TrimRight(s.opts.SyncPeer, "/")
+	if peer == "" || s.opts.SyncPassword == "" || s.opts.StoragePath == "" {
+		return
+	}
+	if peer == strings.TrimRight(s.opts.BaseURL, "/") {
+		return
+	}
+	handle := s.opts.SyncHandle
+	if handle == "" {
+		handle = "mike"
+	}
+	go func() {
+		run := func() {
+			cli := replica.NewClient(peer)
+			token, _, err := cli.Login(ctx, handle, s.opts.SyncPassword)
+			if err != nil {
+				s.logger.Warn("replica login: %v", err)
+				return
+			}
+			raw, err := os.ReadFile(s.opts.StoragePath + "/.openid/accounts.json")
+			if err != nil {
+				s.logger.Warn("replica accounts: %v", err)
+				return
+			}
+			var st replica.StateFile
+			if err := json.Unmarshal(raw, &st); err != nil {
+				s.logger.Warn("replica accounts: %v", err)
+				return
+			}
+			var acc replica.Account
+			var clients []replica.ClientCred
+			for _, a := range st.Accounts {
+				if strings.EqualFold(a.Handle, handle) {
+					acc = a
+					break
+				}
+			}
+			if acc.ID == "" {
+				s.logger.Warn("replica: handle %s not found locally", handle)
+				return
+			}
+			for _, c := range st.Clients {
+				if c.AccountID == acc.ID {
+					clients = append(clients, c)
+				}
+			}
+			if _, err := cli.Adopt(ctx, token, replica.AdoptRequest{
+				Password: s.opts.SyncPassword,
+				Account:  acc,
+				Clients:  clients,
+			}); err != nil {
+				s.logger.Warn("replica adopt: %v", err)
+				return
+			}
+			resources, err := replica.WalkPod(s.opts.StoragePath, handle)
+			if err != nil {
+				s.logger.Warn("replica walk: %v", err)
+				return
+			}
+			put, skipped, err := replica.PushResources(ctx, cli, token, resources, replica.DefaultLocalBases, peer)
+			if err != nil {
+				s.logger.Warn("replica push: %v", err)
+				return
+			}
+			s.logger.Info("replica synced %s → %s (%d put, %d unchanged)", handle, peer, put, skipped)
+		}
+		run()
+		t := time.NewTicker(s.opts.SyncInterval)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				run()
+			}
+		}
+	}()
 }
 
 // Start listens for HTTP connections.

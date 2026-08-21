@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 	"time"
 
@@ -164,4 +165,111 @@ func TestSolidAgentAuditSmoke(t *testing.T) {
 	if ver["verified"] != true {
 		t.Fatalf("verify: %#v", ver)
 	}
+}
+
+func TestReplicaAdoptSameAccount(t *testing.T) {
+	dir := t.TempDir()
+	fs, err := storage.NewFileStorage(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var srv *server.Server
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		srv.Handler().ServeHTTP(w, r)
+	}))
+	defer ts.Close()
+	srv = server.NewServer(&server.ServerOptions{
+		Storage:         fs,
+		StoragePath:     dir,
+		Logger:          logging.NewBasicLogger(logging.Error),
+		BaseURL:         ts.URL,
+		AuditBatchEvery: time.Hour,
+	})
+	srv.Bootstrap(context.Background())
+
+	regBody := `{"handle":"mike","password":"grokbot-dev-2026","name":"Temp","createPod":true}`
+	regResp, err := http.Post(ts.URL+"/idp/register", "application/json", bytes.NewBufferString(regBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	regResp.Body.Close()
+	if regResp.StatusCode != 200 {
+		t.Fatalf("register %d", regResp.StatusCode)
+	}
+
+	loginResp, err := http.Post(ts.URL+"/idp/login", "application/json", bytes.NewBufferString(`{"handle":"mike","password":"grokbot-dev-2026"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var login map[string]interface{}
+	_ = json.NewDecoder(loginResp.Body).Decode(&login)
+	loginResp.Body.Close()
+	token, _ := login["token"].(string)
+	if token == "" {
+		t.Fatal("login token")
+	}
+
+	adopt := map[string]interface{}{
+		"password": "grokbot-dev-2026",
+		"account": map[string]interface{}{
+			"id":           "c06cdb70-9b3f-4fb9-9a7d-a70e41e0756f",
+			"handle":       "mike",
+			"name":         "Mike Holborn",
+			"bio":          "Local Solid pod for Grok Bot.",
+			"passwordHash": loginAccountHash(t, dir, "mike"),
+			"podPath":      "mike/",
+			"created":      "2026-08-19T08:15:03.606875Z",
+		},
+		"clients": []map[string]string{{
+			"id":        "cc_74b671ce-3444-4b1f-bbf1-f1c8599047cf",
+			"secret":    "test-secret",
+			"accountId": "c06cdb70-9b3f-4fb9-9a7d-a70e41e0756f",
+			"name":      "grokbot",
+		}},
+	}
+	raw, _ := json.Marshal(adopt)
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/idp/replica/adopt", bytes.NewReader(raw))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	adoptResp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	adoptBody, _ := io.ReadAll(adoptResp.Body)
+	adoptResp.Body.Close()
+	if adoptResp.StatusCode != 200 {
+		t.Fatalf("adopt %d %s", adoptResp.StatusCode, adoptBody)
+	}
+	var acc map[string]interface{}
+	_ = json.Unmarshal(adoptBody, &acc)
+	if acc["id"] != "c06cdb70-9b3f-4fb9-9a7d-a70e41e0756f" {
+		t.Fatalf("id not adopted: %s", adoptBody)
+	}
+	if acc["name"] != "Mike Holborn" {
+		t.Fatalf("name: %s", adoptBody)
+	}
+}
+
+func loginAccountHash(t *testing.T, dir, handle string) string {
+	t.Helper()
+	raw, err := os.ReadFile(dir + "/.openid/accounts.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var st struct {
+		Accounts []struct {
+			Handle       string `json:"handle"`
+			PasswordHash string `json:"passwordHash"`
+		} `json:"accounts"`
+	}
+	if err := json.Unmarshal(raw, &st); err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range st.Accounts {
+		if a.Handle == handle {
+			return a.PasswordHash
+		}
+	}
+	t.Fatal("hash missing")
+	return ""
 }

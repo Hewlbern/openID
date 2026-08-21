@@ -50,11 +50,11 @@ type Account struct {
 }
 
 type ClientCredentials struct {
-	ID       string `json:"id"`
-	Secret   string `json:"secret,omitempty"`
-	WebID    string `json:"webId"`
+	ID        string `json:"id"`
+	Secret    string `json:"secret,omitempty"`
+	WebID     string `json:"webId"`
 	AccountID string `json:"accountId"`
-	Name     string `json:"name"`
+	Name      string `json:"name"`
 }
 
 func New(store *resourcestore.Store, tokens *authn.TokenService, baseURL string) *Service {
@@ -85,10 +85,10 @@ func (s *Service) Routes(mux *http.ServeMux) {
 func (s *Service) handleConfig(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
-		"name":      "OpenID",
-		"baseUrl":   s.BaseURL,
+		"name":         "OpenID",
+		"baseUrl":      s.BaseURL,
 		"handlePrefix": "/i/",
-		"protocol":  "Solid Protocol",
+		"protocol":     "Solid Protocol",
 	})
 }
 
@@ -165,6 +165,8 @@ func (s *Service) handleIDP(w http.ResponseWriter, r *http.Request) {
 		s.createPod(w, r)
 	case path == "client-credentials" && r.Method == http.MethodPost:
 		s.createClientCredentials(w, r)
+	case path == "replica/adopt" && r.Method == http.MethodPost:
+		s.adoptReplica(w, r)
 	case path == "auth" && r.Method == http.MethodGet:
 		// simplified authorize: redirect with code
 		s.authorize(w, r)
@@ -175,12 +177,12 @@ func (s *Service) handleIDP(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"controls": map[string]string{
-				"register":           s.BaseURL + "/idp/register",
-				"login":              s.BaseURL + "/idp/login",
-				"logout":             s.BaseURL + "/idp/logout",
-				"account":            s.BaseURL + "/idp/accounts/me",
-				"createPod":          s.BaseURL + "/idp/pods",
-				"clientCredentials":  s.BaseURL + "/idp/client-credentials",
+				"register":          s.BaseURL + "/idp/register",
+				"login":             s.BaseURL + "/idp/login",
+				"logout":            s.BaseURL + "/idp/logout",
+				"account":           s.BaseURL + "/idp/accounts/me",
+				"createPod":         s.BaseURL + "/idp/pods",
+				"clientCredentials": s.BaseURL + "/idp/client-credentials",
 			},
 			"version": "solid-go/1.0",
 		})
@@ -426,8 +428,111 @@ func (s *Service) indexAccount(acc *Account) {
 	}
 	if acc.Handle != "" {
 		s.byHandle[acc.Handle] = acc
+		s.byHandle[strings.ToLower(acc.Handle)] = acc
 	}
 	s.byID[acc.ID] = acc
+}
+
+func (s *Service) dropAccountLocked(acc *Account) {
+	if acc == nil {
+		return
+	}
+	if acc.Email != "" {
+		delete(s.accounts, acc.Email)
+	}
+	if acc.Handle != "" {
+		delete(s.byHandle, acc.Handle)
+		delete(s.byHandle, strings.ToLower(acc.Handle))
+	}
+	delete(s.byID, acc.ID)
+}
+
+type adoptReplicaReq struct {
+	Password string               `json:"password"`
+	Account  persistedAccount     `json:"account"`
+	Clients  []*ClientCredentials `json:"clients"`
+}
+
+// adoptReplica merges a replica of an existing account onto this origin.
+// The caller must prove the password for the handle (local hash or the hash already on this server).
+func (s *Service) adoptReplica(w http.ResponseWriter, r *http.Request) {
+	var req adoptReplicaReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	req.Account.Handle = sanitizeSlug(req.Account.Handle)
+	if req.Account.Handle == "" || req.Password == "" || req.Account.PasswordHash == "" {
+		http.Error(w, "handle, password, and account hash required", http.StatusBadRequest)
+		return
+	}
+	if reservedHandles[req.Account.Handle] {
+		http.Error(w, "reserved handle", http.StatusBadRequest)
+		return
+	}
+	incomingOK := bcrypt.CompareHashAndPassword([]byte(req.Account.PasswordHash), []byte(req.Password)) == nil
+	s.mu.Lock()
+	existing := s.byHandle[req.Account.Handle]
+	existingOK := existing != nil && bcrypt.CompareHashAndPassword([]byte(existing.PasswordHash), []byte(req.Password)) == nil
+	if !incomingOK && !existingOK {
+		s.mu.Unlock()
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if existing != nil && !existingOK && incomingOK {
+		// password matches the incoming replica only — do not clobber a different live account
+		s.mu.Unlock()
+		http.Error(w, "handle taken", http.StatusConflict)
+		return
+	}
+	hadPod := existing != nil
+	hash := req.Account.PasswordHash
+	if !incomingOK && existing != nil {
+		hash = existing.PasswordHash
+	}
+	if existing != nil {
+		s.dropAccountLocked(existing)
+		for id, c := range s.clients {
+			if c != nil && (c.AccountID == existing.ID || c.AccountID == req.Account.ID) {
+				delete(s.clients, id)
+			}
+		}
+	}
+	webID := s.BaseURL + "/" + req.Account.Handle + "/profile/card#me"
+	acc := &Account{
+		ID:           req.Account.ID,
+		Handle:       req.Account.Handle,
+		Email:        req.Account.Email,
+		Name:         req.Account.Name,
+		Bio:          req.Account.Bio,
+		PasswordHash: hash,
+		WebID:        webID,
+		PodPath:      req.Account.Handle + "/",
+		PublicURL:    s.BaseURL + "/i/" + req.Account.Handle,
+		Created:      req.Account.Created,
+	}
+	if acc.ID == "" {
+		acc.ID = uuid.NewString()
+	}
+	if acc.Created.IsZero() {
+		acc.Created = time.Now().UTC()
+	}
+	s.indexAccount(acc)
+	for _, c := range req.Clients {
+		if c == nil || c.ID == "" {
+			continue
+		}
+		c.AccountID = acc.ID
+		c.WebID = webID
+		s.clients[c.ID] = c
+	}
+	s.saveLocked()
+	s.mu.Unlock()
+	if !hadPod {
+		_ = s.provisionPod(r.Context(), acc, acc.Name)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(acc)
 }
 
 func (s *Service) me(w http.ResponseWriter, r *http.Request) {
@@ -645,8 +750,8 @@ func sanitizeSlug(s string) string {
 }
 
 type persistedState struct {
-	Accounts []persistedAccount     `json:"accounts"`
-	Clients  []*ClientCredentials   `json:"clients"`
+	Accounts []persistedAccount   `json:"accounts"`
+	Clients  []*ClientCredentials `json:"clients"`
 }
 
 type persistedAccount struct {

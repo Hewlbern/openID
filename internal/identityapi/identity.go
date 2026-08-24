@@ -21,6 +21,9 @@ import (
 	"solid-go/internal/wac"
 )
 
+// passwordSessionTTL is long-lived so local sign-in stays up; the password is mainly for cloud sync.
+const passwordSessionTTL = 10 * 365 * 24 * time.Hour
+
 // Service provides account, pod, WebID, and client-credentials identity APIs.
 type Service struct {
 	Store   *resourcestore.Store
@@ -278,10 +281,11 @@ func (s *Service) register(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	s.saveLocked()
-	token, _ := s.Tokens.Issue(acc.WebID, "", 24*time.Hour)
+	token, _ := s.Tokens.Issue(acc.WebID, "", passwordSessionTTL)
 	sid := uuid.NewString()
 	s.sessions[sid] = acc.ID
-	http.SetCookie(w, &http.Cookie{Name: "solid-session", Value: sid, Path: "/", HttpOnly: true})
+	http.SetCookie(w, &http.Cookie{Name: "solid-session", Value: sid, Path: "/", HttpOnly: true, MaxAge: int(passwordSessionTTL.Seconds())})
+	s.saveLocalAuth(acc.Handle, req.Password)
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"account": acc,
@@ -383,12 +387,13 @@ func (s *Service) login(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid credentials", http.StatusUnauthorized)
 		return
 	}
-	token, _ := s.Tokens.Issue(acc.WebID, "", 24*time.Hour)
+	token, _ := s.Tokens.Issue(acc.WebID, "", passwordSessionTTL)
 	sid := uuid.NewString()
 	s.mu.Lock()
 	s.sessions[sid] = acc.ID
 	s.mu.Unlock()
-	http.SetCookie(w, &http.Cookie{Name: "solid-session", Value: sid, Path: "/", HttpOnly: true})
+	http.SetCookie(w, &http.Cookie{Name: "solid-session", Value: sid, Path: "/", HttpOnly: true, MaxAge: int(passwordSessionTTL.Seconds())})
+	s.saveLocalAuth(acc.Handle, req.Password)
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{"token": token, "webId": acc.WebID, "account": acc})
 }
@@ -818,6 +823,25 @@ func (s *Service) saveLocked() {
 		return
 	}
 	_, _ = s.Store.Put(context.Background(), ".openid/accounts.json", "application/json", raw, "", "")
+}
+
+func (s *Service) saveLocalAuth(handle, password string) {
+	if handle == "" || password == "" {
+		return
+	}
+	peer := s.BaseURL
+	if !strings.Contains(peer, "railway.app") {
+		peer = "https://pod-production-ebe1.up.railway.app"
+	}
+	raw, err := json.MarshalIndent(map[string]string{
+		"handle":   handle,
+		"password": password,
+		"peer":     peer,
+	}, "", "  ")
+	if err != nil {
+		return
+	}
+	_, _ = s.Store.Put(context.Background(), ".openid/local-auth.json", "application/json", raw, "", "")
 }
 
 func randomHex(n int) string {

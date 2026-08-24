@@ -94,13 +94,25 @@ cd frontend
 OPENID_API=https://<your-railway-domain> vercel --prod
 ```
 
-Other operators can run the same split: one SolidGo instance (Railway/Docker) plus a Vercel project whose `OPENID_API` points at their server.
-
-With Docker (server + Kubo IPFS):
+The **pod is the product**. Anyone can run the same Docker image — locally, on Railway, or anywhere that can keep a volume. The Vercel site and any future desktop app are optional clients of that origin. They are not required to run a pod.
 
 ```bash
-docker compose up -d --build
+# published image, persistent volume, dashboard at http://localhost:3000
+docker compose up -d
 ```
+
+Set `SOLID_BASE_URL` to the URL others will use for WebIDs. To also keep a replica of a handle on another origin (for example Railway):
+
+```bash
+SOLID_BASE_URL=http://localhost:3000 \
+SOLID_SYNC_PEER=https://pod-production-ebe1.up.railway.app \
+SOLID_SYNC_HANDLE=mike \
+SOLID_SYNC_PASSWORD=… \
+docker compose up -d
+```
+
+Optional Kubo (audit CIDs): `docker compose --profile ipfs up -d` and `IPFS_API=http://ipfs:5001`.
+Other operators can run the same split: one SolidGo instance (Railway/Docker) plus a Vercel project whose `OPENID_API` points at their server.
 
 ## 60-second agent demo
 

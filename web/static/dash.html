@@ -3,143 +3,181 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>OpenID — Solid server</title>
-  <meta name="description" content="Open-source Solid Protocol server dashboard: browse pods, manage identity, agents, and audit." />
+  <title>oid — Solid server</title>
+  <meta name="description" content="Open-source Solid Protocol server: your WebID and pod in one place." />
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
   <link rel="stylesheet" href="/static/dash.css" />
   <script src="/static/config.js"></script>
 </head>
 <body>
-  <header class="top">
-    <a class="brand" href="/">
-      <span class="glyph" aria-hidden="true"></span>
-      <span>
-        <strong>OpenID</strong>
-        <small>Solid server</small>
-      </span>
-    </a>
-    <div class="top-meta">
+  <div class="home">
+    <header class="bar" data-tauri-drag-region>
+      <a class="brand" href="/">
+        <span class="mark" aria-hidden="true"></span>
+        <span>oid <small>Solid server</small></span>
+      </a>
+      <nav class="quiet">
+        <a href="/welcome">Welcome</a>
+        <a href="/records">Records</a>
+        <button type="button" data-open="browser" class="in-only">Pod</button>
+      </nav>
       <span class="pill" id="healthPill">…</span>
-      <span class="mono" id="baseLabel"></span>
-      <a href="/records">Records</a>
-      <a href="/welcome">Landing</a>
-      <a href="https://github.com/Hewlbern/openID">GitHub</a>
-    </div>
-  </header>
+      <button type="button" class="me-btn" id="meBtn">
+        <span class="face" id="meAvatar"></span>
+        <span id="meName">Sign in</span>
+      </button>
+    </header>
 
-  <nav class="tabs" id="tabs">
-    <button type="button" data-tab="overview" class="on">Overview</button>
-    <button type="button" data-tab="browser">Browser</button>
-    <button type="button" data-tab="identity">Identity</button>
-    <button type="button" data-tab="agents">Agents</button>
-    <button type="button" data-tab="audit">Audit</button>
-  </nav>
+    <main class="stage">
+      <span class="mark hero-mark" aria-hidden="true"></span>
+      <h1 id="headTitle">oid</h1>
+      <p class="sub" id="who">Sign in to your pod. One identity for you and the agents you allow.</p>
+      <p class="mono" id="webid"></p>
 
-  <main>
-    <section id="overview" class="pane on">
-      <div class="grid">
-        <article class="card">
-          <h2>This instance</h2>
-          <dl id="statusList" class="kv"></dl>
-        </article>
-        <article class="card">
-          <h2>Discovery</h2>
-          <ul class="links" id="disco"></ul>
-        </article>
+      <section class="auth" id="authGate">
+        <div class="tabs" role="tablist">
+          <button type="button" class="on" id="tabLogin" data-auth="login">Sign in</button>
+          <button type="button" id="tabRegister" data-auth="register">Create a pod</button>
+        </div>
+
+        <form id="loginForm" class="auth-form" autocomplete="on">
+          <label>
+            Handle or email
+            <input name="handle" required placeholder="mike" autocomplete="username" />
+          </label>
+          <label>
+            Password
+            <span class="pw">
+              <input name="password" type="password" required autocomplete="current-password" />
+              <button type="button" class="reveal" data-reveal aria-label="Show password">Show</button>
+            </span>
+          </label>
+          <p class="auth-msg" id="loginMsg" role="status"></p>
+          <button class="btn wide" type="submit" id="loginBtn">Continue</button>
+        </form>
+
+        <form id="registerForm" class="auth-form" hidden autocomplete="on">
+          <label>
+            Handle
+            <input name="handle" required placeholder="ada" autocomplete="username" spellcheck="false" />
+          </label>
+          <label>
+            Your name
+            <input name="name" placeholder="Ada Lovelace" autocomplete="name" />
+          </label>
+          <label>
+            Password
+            <span class="pw">
+              <input name="password" type="password" required minlength="8" autocomplete="new-password" />
+              <button type="button" class="reveal" data-reveal aria-label="Show password">Show</button>
+            </span>
+          </label>
+          <p class="auth-msg" id="registerMsg" role="status"></p>
+          <button class="btn wide" type="submit" id="registerBtn">Create my pod</button>
+        </form>
+      </section>
+
+      <div class="work" id="work" hidden>
+        <div class="stream" id="stream"></div>
+        <form class="composer" id="composer">
+          <button type="button" class="plus" id="attach" aria-label="Files">+</button>
+          <input id="composerInput" autocomplete="off" placeholder="Write a note to your pod" />
+          <button type="submit" class="go" aria-label="Save">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 13 V4 M4.6 7.4 L8 4 L11.4 7.4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+          </button>
+        </form>
+        <p class="hint" id="composerHint">Notes save on this pod.</p>
+        <form class="find-home" id="findRecords">
+          <input id="findQ" type="search" placeholder="Search your records" aria-label="Search records" />
+          <button class="btn ghost" type="submit">Search</button>
+        </form>
+        <div class="tools">
+          <button type="button" data-open="identity">Account</button>
+          <button type="button" data-open="browser">Files</button>
+          <button type="button" data-open="agents">Agents</button>
+          <button type="button" data-open="audit">Audit</button>
+          <a href="/records">Records</a>
+        </div>
       </div>
-      <article class="card">
-        <h2>Quick start</h2>
-        <pre class="code">go run ./cmd/server -port 4000 -storage ./data
+    </main>
 
-curl -s http://localhost:4000/health
-curl -s -H 'Accept: text/turtle' http://localhost:4000/mike/
-curl -s -X PUT http://localhost:4000/mike/public/note.txt \
-  -H "Authorization: Bearer $TOKEN" -d 'hello'</pre>
-      </article>
-    </section>
+    <div class="drawer" id="drawer" hidden>
+      <button type="button" class="close" id="closeDrawer">Close</button>
 
-    <section id="browser" class="pane">
-      <article class="card">
-        <h2>LDP browser</h2>
-        <p class="hint">GET any pod path. Authenticated writes use your session token.</p>
-        <form id="browseForm" class="row">
-          <input id="resPath" value="/" spellcheck="false" aria-label="Resource path" />
-          <button class="btn" type="submit">GET</button>
-        </form>
-        <div id="children" class="chips"></div>
-        <div class="meta mono" id="resMeta"></div>
-        <pre class="code body" id="resBody"></pre>
-        <form id="putForm" class="stack">
-          <label>PUT body</label>
-          <textarea id="putBody" rows="6" placeholder="resource contents"></textarea>
-          <div class="row">
-            <input id="putType" value="text/plain" aria-label="Content type" />
-            <button class="btn" type="submit">PUT</button>
-          </div>
-        </form>
-        <p class="msg" id="browseMsg"></p>
-      </article>
-    </section>
+      <section id="overview" class="pane">
+        <div class="grid">
+          <article class="card">
+            <h2>This instance</h2>
+            <dl id="statusList" class="kv"></dl>
+          </article>
+          <article class="card">
+            <h2>Discovery</h2>
+            <ul class="links" id="disco"></ul>
+          </article>
+        </div>
+      </section>
 
-    <section id="identity" class="pane">
-      <div class="grid">
+      <section id="browser" class="pane">
+        <article class="card">
+          <h2>Pod files</h2>
+          <p class="hint">GET any path. Writes use your session.</p>
+          <form id="browseForm" class="row">
+            <input id="resPath" value="/" spellcheck="false" aria-label="Resource path" />
+            <button class="btn" type="submit">GET</button>
+          </form>
+          <div id="children" class="chips"></div>
+          <div class="meta mono" id="resMeta"></div>
+          <pre class="code body" id="resBody"></pre>
+          <form id="putForm" class="stack">
+            <label>PUT body</label>
+            <textarea id="putBody" rows="6" placeholder="resource contents"></textarea>
+            <div class="row">
+              <input id="putType" value="text/plain" aria-label="Content type" />
+              <button class="btn" type="submit">PUT</button>
+            </div>
+          </form>
+          <p class="msg" id="browseMsg"></p>
+        </article>
+      </section>
+
+      <section id="identity" class="pane">
         <article class="card" id="sessionCard">
-          <h2>Session</h2>
-          <p id="who">Not signed in.</p>
-          <p class="mono" id="webid"></p>
+          <h2>Account</h2>
+          <p class="mono" id="baseLabel"></p>
           <div class="row wrap" id="sessionActions"></div>
         </article>
+      </section>
+
+      <section id="agents" class="pane">
         <article class="card">
-          <h2>Sign in</h2>
-          <form id="loginForm" class="stack">
-            <label>Handle or email</label>
-            <input name="id" required placeholder="mike" />
-            <label>Password</label>
-            <input name="password" type="password" required />
-            <button class="btn" type="submit">Log in</button>
+          <h2>AI agents</h2>
+          <form id="agentForm" class="row">
+            <input name="name" placeholder="Agent name" value="grokbot" />
+            <button class="btn" type="submit">Issue agent</button>
           </form>
+          <pre class="code" id="agentSecret"></pre>
+          <div id="agentList" class="table"></div>
         </article>
+      </section>
+
+      <section id="audit" class="pane">
         <article class="card">
-          <h2>Create account + pod</h2>
-          <form id="registerForm" class="stack">
-            <label>Handle</label>
-            <input name="handle" required placeholder="ada" />
-            <label>Name</label>
-            <input name="name" placeholder="Ada Lovelace" />
-            <label>Password</label>
-            <input name="password" type="password" required minlength="8" />
-            <button class="btn" type="submit">Register</button>
-          </form>
+          <h2>Audit trail</h2>
+          <p class="hint">Mutating LDP requests are hashed, Merkle-batched, and stamped with OpenTimestamps.</p>
+          <button class="btn ghost" id="flush" type="button">Flush Merkle + OTS batch</button>
+          <div id="auditList" class="table"></div>
         </article>
-      </div>
-    </section>
+      </section>
 
-    <section id="agents" class="pane">
-      <article class="card">
-        <h2>AI agents</h2>
-        <form id="agentForm" class="row">
-          <input name="name" placeholder="Agent name" value="grokbot" />
-          <button class="btn" type="submit">Issue agent</button>
-        </form>
-        <pre class="code" id="agentSecret"></pre>
-        <div id="agentList" class="table"></div>
-      </article>
-    </section>
-
-    <section id="audit" class="pane">
-      <article class="card">
-        <h2>Audit trail</h2>
-        <p class="hint">Mutating LDP requests are hashed, optionally pinned to IPFS, Merkle-batched, and stamped with OpenTimestamps.</p>
-        <button class="btn ghost" id="flush" type="button">Flush Merkle + OTS batch</button>
-        <div id="auditList" class="table"></div>
-      </article>
-    </section>
-  </main>
-
-  <footer class="foot">
-    Apache-2.0 · <a href="https://github.com/Hewlbern/openID">Hewlbern/openID</a>
-    · Solid Protocol server in Go
-  </footer>
+      <section id="records" class="pane">
+        <article class="card">
+          <h2>Your records</h2>
+          <p class="hint">Conversations and Cursor traces live on this pod.</p>
+          <a class="btn" href="/records">Open records</a>
+        </article>
+      </section>
+    </div>
+  </div>
   <script src="/static/dash.js"></script>
 </body>
 </html>

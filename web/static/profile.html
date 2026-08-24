@@ -3,43 +3,44 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>OpenID</title>
+  <title>oid</title>
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
   <link rel="stylesheet" href="/static/styles.css" />
   <script src="/static/config.js"></script>
 </head>
 <body>
-  <div class="wrap">
-    <header class="nav">
-      <a class="brand" href="/">
-        <span class="dots" aria-hidden="true"><i></i><i></i></span>
-        OPENID
-      </a>
-      <div class="nav-right">
-        <a href="/">Claim a handle</a>
-      </div>
-    </header>
-    <main class="profile-page">
-      <div class="avatar" id="avatar">?</div>
-      <h1 id="name">…</h1>
-      <p class="mono" id="handle"></p>
-      <p id="bio" class="lede"></p>
-      <p class="mono" id="webid"></p>
-      <p><a id="pod" href="#">Solid pod →</a></p>
-    </main>
-  </div>
+  <header class="title">
+    <a class="brand" href="/">
+      <span class="mark" aria-hidden="true"></span>
+      <span class="app-name">oid</span>
+    </a>
+    <a class="ghost" href="/" style="margin-left:auto">Claim a handle</a>
+  </header>
+  <main class="profile-page">
+    <div class="face" id="avatar"></div>
+    <h1 id="name">…</h1>
+    <p class="mono" id="handle"></p>
+    <p id="bio" class="lede"></p>
+    <p class="mono" id="webid"></p>
+    <p><a id="pod" href="#">Solid pod →</a></p>
+  </main>
   <script>
     const handle = location.pathname.replace(/^\/i\//, "").replace(/\/$/, "");
+    function hueFor(s) {
+      let n = 18;
+      String(s || "").split("").forEach((c) => { n = (n * 31 + c.charCodeAt(0)) % 360; });
+      return n;
+    }
     fetch(openidURL("/i/" + encodeURIComponent(handle)), { headers: { Accept: "application/json" } })
       .then((r) => { if (!r.ok) throw r; return r.json(); })
       .then((p) => {
-        document.title = (p.name || p.handle) + " — OpenID";
+        document.title = (p.name || p.handle) + " — oid";
         document.getElementById("name").textContent = p.name || p.handle;
         document.getElementById("handle").textContent = "/i/" + p.handle;
         document.getElementById("bio").textContent = p.bio || "This Solid identity is still being written.";
         document.getElementById("webid").textContent = p.webId;
         document.getElementById("pod").href = p.pod;
-        document.getElementById("avatar").textContent = (p.name || p.handle || "?").slice(0, 1).toUpperCase();
+        document.getElementById("avatar").style.setProperty("--h", String(hueFor(p.handle)));
       })
       .catch(() => {
         document.getElementById("name").textContent = "Handle not claimed";

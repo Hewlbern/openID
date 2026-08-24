@@ -211,20 +211,39 @@ func (s *Server) bootstrap(ctx context.Context) {
 
 func (s *Server) startReplica(ctx context.Context) {
 	peer := strings.TrimRight(s.opts.SyncPeer, "/")
-	if peer == "" || s.opts.SyncPassword == "" || s.opts.StoragePath == "" {
+	password := s.opts.SyncPassword
+	handle := s.opts.SyncHandle
+	if raw, err := os.ReadFile(s.opts.StoragePath + "/.openid/local-auth.json"); err == nil {
+		var auth struct {
+			Handle   string `json:"handle"`
+			Password string `json:"password"`
+			Peer     string `json:"peer"`
+		}
+		if json.Unmarshal(raw, &auth) == nil {
+			if password == "" {
+				password = auth.Password
+			}
+			if handle == "" {
+				handle = auth.Handle
+			}
+			if peer == "" {
+				peer = strings.TrimRight(auth.Peer, "/")
+			}
+		}
+	}
+	if peer == "" || password == "" || s.opts.StoragePath == "" {
 		return
 	}
 	if peer == strings.TrimRight(s.opts.BaseURL, "/") {
 		return
 	}
-	handle := s.opts.SyncHandle
 	if handle == "" {
 		handle = "mike"
 	}
 	go func() {
 		run := func() {
 			cli := replica.NewClient(peer)
-			token, _, err := cli.Login(ctx, handle, s.opts.SyncPassword)
+			token, _, err := cli.Login(ctx, handle, password)
 			if err != nil {
 				s.logger.Warn("replica login: %v", err)
 				return
@@ -257,7 +276,7 @@ func (s *Server) startReplica(ctx context.Context) {
 				}
 			}
 			if _, err := cli.Adopt(ctx, token, replica.AdoptRequest{
-				Password: s.opts.SyncPassword,
+				Password: password,
 				Account:  acc,
 				Clients:  clients,
 			}); err != nil {

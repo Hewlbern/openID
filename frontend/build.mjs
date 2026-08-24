@@ -36,6 +36,8 @@ writeFileSync(join(dist, "vercel.json"), JSON.stringify({
     { source: "/welcome/", destination: "/index.html" },
     { source: "/app", destination: "/app.html" },
     { source: "/app/", destination: "/app.html" },
+    { source: "/records", destination: "/records.html" },
+    { source: "/records/", destination: "/records.html" },
     { source: "/i/:path*", destination: "/profile.html" },
     { source: "/login", destination: "/dash.html" },
   ],

@@ -7,35 +7,30 @@ const apiHost = (() => {
 })();
 const hostPrefix = apiHost + "/i/";
 document.querySelectorAll("[data-prefix]").forEach((el) => { el.textContent = hostPrefix; });
-document.querySelectorAll(".host-url").forEach((el) => { el.textContent = hostPrefix + "you"; });
-
-function drawOrb() {
-  const canvas = document.getElementById("orb");
-  if (!canvas) return;
-  const ctx = canvas.getContext("2d");
-  const w = canvas.width, h = canvas.height;
-  ctx.clearRect(0, 0, w, h);
-  const cx = w * 0.5, cy = h * 0.48, r = Math.min(w, h) * 0.36;
-  for (let i = 0; i < 1600; i++) {
-    const u = Math.random() * Math.PI * 2;
-    const v = Math.acos(2 * Math.random() - 1);
-    const x = Math.sin(v) * Math.cos(u);
-    const y = Math.cos(v);
-    const z = Math.sin(v) * Math.sin(u);
-    const shade = 0.45 + z * 0.55;
-    ctx.beginPath();
-    ctx.fillStyle = `rgba(255,255,255,${shade})`;
-    ctx.arc(cx + x * r, cy + y * r * 0.92, 1.05 + shade * 1.7, 0, Math.PI * 2);
-    ctx.fill();
-  }
-}
 
 const claimModal = document.getElementById("claimModal");
-const loginModal = document.getElementById("loginModal");
 const registerForm = document.getElementById("registerForm");
 const loginForm = document.getElementById("loginForm");
+const claimForm = document.getElementById("claimForm");
 const modalHandle = document.getElementById("modalHandle");
+const loginBtn = document.getElementById("loginBtn");
+const signupBtn = document.getElementById("signupBtn");
 let availableHandle = "";
+
+function field(form, name) {
+  return form && form.elements ? form.elements.namedItem(name) : null;
+}
+
+function showLogin(on) {
+  if (claimForm) claimForm.hidden = on;
+  if (loginForm) loginForm.hidden = !on;
+  if (loginBtn) loginBtn.hidden = on;
+  if (signupBtn) signupBtn.hidden = !on;
+  const lead = document.getElementById("gateLead");
+  if (lead) lead.textContent = on ? "Your pod. One identity." : "Claim a handle. One identity.";
+  const first = on ? field(loginForm, "handle") : document.getElementById("handle");
+  if (first) first.focus();
+}
 
 async function checkHandle(value, statusEl, btn) {
   const handle = value.toLowerCase().replace(/[^a-z0-9-]/g, "");
@@ -68,8 +63,6 @@ function bindClaim(formId, inputId, btnId, statusId) {
   if (!form) return;
   let t;
   input.addEventListener("input", () => {
-    const name = document.querySelector(".pass-name");
-    if (name) name.textContent = (input.value || "YOUR NAME").toUpperCase();
     clearTimeout(t);
     t = setTimeout(() => checkHandle(input.value, status, btn), 180);
   });
@@ -77,28 +70,28 @@ function bindClaim(formId, inputId, btnId, statusId) {
     e.preventDefault();
     if (!availableHandle) return;
     modalHandle.textContent = availableHandle;
-    registerForm.name.value = availableHandle;
+    field(registerForm, "name").value = availableHandle;
     claimModal.classList.add("open");
   });
 }
 
 bindClaim("claimForm", "handle", "claimBtn", "claimStatus");
-bindClaim("claimForm2", "handle2", "claimBtn2", "claimStatus2");
 
-document.getElementById("loginBtn").addEventListener("click", () => loginModal.classList.add("open"));
-const passportCta = document.getElementById("passportCta");
-if (passportCta) passportCta.addEventListener("click", () => loginModal.classList.add("open"));
-[claimModal, loginModal].forEach((el) => el.addEventListener("click", (e) => {
-  if (e.target === el) el.classList.remove("open");
-}));
+if (loginBtn) loginBtn.addEventListener("click", () => showLogin(true));
+if (signupBtn) signupBtn.addEventListener("click", () => showLogin(false));
+if (claimModal) {
+  claimModal.addEventListener("click", (e) => {
+    if (e.target === claimModal) claimModal.classList.remove("open");
+  });
+}
 
 registerForm.addEventListener("submit", async (e) => {
   e.preventDefault();
   const body = {
     handle: availableHandle,
-    name: registerForm.name.value,
-    password: registerForm.password.value,
-    email: registerForm.email.value,
+    name: field(registerForm, "name").value,
+    password: field(registerForm, "password").value,
+    email: field(registerForm, "email").value,
     createPod: true,
   };
   const res = await fetch(openidURL("/idp/register"), {
@@ -118,25 +111,35 @@ registerForm.addEventListener("submit", async (e) => {
 
 loginForm.addEventListener("submit", async (e) => {
   e.preventDefault();
-  const id = loginForm.id.value.trim();
-  const payload = id.includes("@")
-    ? { email: id, password: loginForm.password.value }
-    : { handle: id, password: loginForm.password.value };
+  const handle = (field(loginForm, "handle").value || "").trim();
+  const password = field(loginForm, "password").value;
+  const payload = handle.includes("@")
+    ? { email: handle, password }
+    : { handle, password };
   const res = await fetch(openidURL("/idp/login"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
   if (!res.ok) {
-    alert("Could not log in");
+    const status = document.getElementById("claimStatus");
+    status.className = "status bad";
+    status.textContent = "Could not sign in.";
     return;
   }
   const data = await res.json();
   localStorage.setItem("openid.token", data.token);
+  if (handle && !handle.includes("@")) localStorage.setItem("openid.handle", handle);
   location.href = "/app";
 });
 
-drawOrb();
+const apiStatus = document.getElementById("apiStatus");
+if (apiStatus) {
+  fetch(openidURL("/health")).then((r) => {
+    apiStatus.textContent = r.ok ? (apiHost.includes("railway") ? "Railway" : "Pod") : "No pod";
+  }).catch(() => { apiStatus.textContent = "No pod"; });
+}
+
 if (localStorage.getItem("openid.token")) {
   fetch(openidURL("/idp/accounts/me"), { headers: { Authorization: "Bearer " + localStorage.getItem("openid.token") } })
     .then((r) => { if (r.ok) location.replace("/app"); });

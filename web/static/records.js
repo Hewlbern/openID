@@ -1,11 +1,13 @@
 const tokenKey = "openid.token";
 const $ = (id) => document.getElementById(id);
 let token = localStorage.getItem(tokenKey) || "";
+let handle = "mike";
 let traces = [];
 let catalog = null;
-let filters = { workType: "all", domain: "all", package: "all" };
+let grokDoc = {};
 let sparqlIDs = null;
-let lastSparql = "";
+let cwd = [];
+let selected = null;
 
 function headers() {
   const h = { Accept: "application/ld+json, application/json" };
@@ -24,14 +26,54 @@ function fmt(n) {
 }
 
 function when(iso) {
-  if (!iso) return "—";
-  return String(iso).replace("T", " ").replace("Z", " UTC");
+  if (!iso) return "";
+  return String(iso).replace("T", " ").replace(/\.\d+Z?$/, "").slice(0, 16);
 }
 
 function graph(doc) {
   if (Array.isArray(doc)) return doc;
   if (doc && Array.isArray(doc["@graph"])) return doc["@graph"];
   return doc ? [doc] : [];
+}
+
+function field(t, ...keys) {
+  for (const k of keys) {
+    if (t[k] != null && t[k] !== "") return t[k];
+  }
+  return "";
+}
+
+function haystack(t) {
+  return [
+    field(t, "name", "schema:name"),
+    field(t, "description", "oid:query", "query"),
+    field(t, "workType", "genre"),
+    field(t, "domain", "about"),
+    field(t, "package", "oid:package"),
+    field(t, "artifact"),
+    field(t, "identifier"),
+    field(t, "sourcePath", "oid:path"),
+    [].concat(t.keywords || []).join(" "),
+  ].join(" ").toLowerCase();
+}
+
+function queryTerms() {
+  return ($("q").value || "").trim().toLowerCase().split(/\s+/).filter(Boolean);
+}
+
+function matchesSearch(t) {
+  const terms = queryTerms();
+  if (!terms.length) return true;
+  const hay = haystack(t);
+  return terms.every((term) => hay.includes(term));
+}
+
+function highlight(text) {
+  const raw = String(text || "");
+  const terms = queryTerms().filter((t) => t.length > 1);
+  if (!terms.length) return escapeHtml(raw);
+  const re = new RegExp("(" + terms.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|") + ")", "ig");
+  return escapeHtml(raw).replace(re, "<mark>$1</mark>");
 }
 
 async function api(path) {
@@ -45,9 +87,36 @@ async function api(path) {
   return res.text();
 }
 
+function enterArchive() {
+  document.body.classList.add("in");
+  $("gate").hidden = true;
+  $("archive").hidden = false;
+  $("findForm").hidden = false;
+}
+
+function leaveArchive() {
+  document.body.classList.remove("in");
+  $("archive").hidden = true;
+  $("findForm").hidden = true;
+  $("gate").hidden = false;
+  cwd = [];
+  selected = null;
+}
+
+function setQuery(value, push) {
+  $("q").value = value || "";
+  $("clearQ").hidden = !$("q").value;
+  const url = new URL(location.href);
+  if ($("q").value) url.searchParams.set("q", $("q").value);
+  else url.searchParams.delete("q");
+  if (push !== false) history.replaceState({}, "", url);
+  renderDir();
+}
+
 $("loginForm").addEventListener("submit", async (e) => {
   e.preventDefault();
-  $("gateMsg").textContent = "";
+  $("gateMsg").textContent = "Opening…";
+  $("gateMsg").className = "auth-msg";
   const fd = new FormData(e.target);
   const res = await fetch(openidURL("/idp/login"), {
     method: "POST",
@@ -55,20 +124,40 @@ $("loginForm").addEventListener("submit", async (e) => {
     body: JSON.stringify({ handle: fd.get("handle"), password: fd.get("password") }),
   });
   if (!res.ok) {
-    $("gateMsg").textContent = "Could not sign in. Check handle and password.";
+    $("gateMsg").textContent = "That handle and password did not match.";
+    $("gateMsg").className = "auth-msg bad";
     return;
   }
   setToken((await res.json()).token);
+  enterArchive();
   openArchive();
 });
 
 $("logout").addEventListener("click", () => {
   setToken("");
   sparqlIDs = null;
-  $("archive").hidden = true;
-  $("sparqlForm").hidden = true;
-  $("sparqlCard").hidden = true;
-  $("gate").hidden = false;
+  leaveArchive();
+});
+
+$("findForm").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const raw = $("q").value.trim();
+  if (/^\s*(PREFIX|BASE|SELECT|ASK|CONSTRUCT|DESCRIBE)\b/i.test(raw)) {
+    $("sparql").value = raw;
+    runSPARQL(raw);
+    return;
+  }
+  setQuery(raw);
+});
+
+$("q").addEventListener("input", () => {
+  sparqlIDs = null;
+  setQuery($("q").value);
+});
+$("clearQ").addEventListener("click", () => {
+  sparqlIDs = null;
+  setQuery("");
+  $("q").focus();
 });
 
 $("sparqlForm").addEventListener("submit", (e) => {
@@ -85,137 +174,290 @@ $("pwForm").addEventListener("submit", async (e) => {
     headers: Object.assign({ "Content-Type": "application/json" }, headers()),
     body: JSON.stringify({ password }),
   });
-  $("pwMsg").textContent = res.ok ? "Password saved. Use it the next time you sign in." : "Could not update password.";
+  $("pwMsg").textContent = res.ok ? "Password saved." : "Could not update password.";
   if (res.ok) e.target.reset();
+});
+
+document.querySelectorAll("[data-reveal]").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    const input = btn.parentElement.querySelector("input");
+    const show = input.type === "password";
+    input.type = show ? "text" : "password";
+    btn.textContent = show ? "Hide" : "Show";
+  });
+});
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "/" && document.activeElement.tagName !== "INPUT") {
+    e.preventDefault();
+    $("q").focus();
+  }
+  if (e.key === "Escape") {
+    if (document.activeElement === $("q") && $("q").value) setQuery("");
+    else if (cwd.length) {
+      cwd = cwd.slice(0, -1);
+      selected = null;
+      renderDir();
+    }
+  }
 });
 
 async function openArchive() {
   try {
-    catalog = await api("/mike/records/catalog.jsonld");
-    traces = graph(await api("/mike/records/cursor/transcripts.jsonld"));
-    const grokDoc = await api("/mike/records/grokbot/settings.jsonld").catch(() => ({}));
     const me = await api("/idp/accounts/me");
-    $("gate").hidden = true;
-    $("archive").hidden = false;
-    $("sparqlForm").hidden = false;
-    $("whoLine").textContent = (me.name || me.handle) + " · JSON-LD archive · SPARQL on /records/sparql";
+    handle = me.handle || "mike";
+    catalog = await api("/" + handle + "/records/catalog.jsonld");
+    traces = graph(await api("/" + handle + "/records/cursor/transcripts.jsonld"));
+    grokDoc = await api("/" + handle + "/records/grokbot/settings.jsonld").catch(() => ({}));
+    enterArchive();
+    $("whoLine").textContent = (me.name || me.handle) + " · /" + handle + "/records/";
+    $("rawLink").href = "/" + handle + "/records/catalog.jsonld";
+    $("rdfLink").href = "/" + handle + "/records/catalog.ttl";
     renderStats();
     renderGrok(grokDoc, me);
     renderExamples();
-    renderFacets();
-    renderTraces();
+    const start = new URLSearchParams(location.search).get("q") || "";
+    setQuery(start, false);
+    $("q").focus();
   } catch (err) {
     setToken("");
-    $("archive").hidden = true;
-    $("gate").hidden = false;
-    if (err.status) $("gateMsg").textContent = "This archive is private. Sign in as the pod owner.";
+    leaveArchive();
+    if (err.status) {
+      $("gateMsg").textContent = "This archive is private. Sign in as the pod owner.";
+      $("gateMsg").className = "auth-msg bad";
+    }
   }
 }
 
+function packages() {
+  const map = {};
+  traces.forEach((t) => {
+    const p = field(t, "package") || "unsorted";
+    map[p] = (map[p] || 0) + 1;
+  });
+  return map;
+}
+
+function latestIn(pkg) {
+  let latest = "";
+  traces.forEach((t) => {
+    if ((field(t, "package") || "unsorted") !== pkg) return;
+    const d = field(t, "dateModified", "dateCreated");
+    if (d > latest) latest = d;
+  });
+  return latest;
+}
+
+function dirEntries() {
+  const q = $("q").value.trim();
+  if (q) {
+    return visibleTraces().slice(0, 300).map((t) => ({
+      kind: "file",
+      id: t.identifier,
+      name: field(t, "name", "schema:name") || t.identifier,
+      meta: ["traces", field(t, "package") || "unsorted"].join("/"),
+      when: field(t, "dateModified", "dateCreated"),
+      trace: t,
+    }));
+  }
+  if (cwd.length === 0) {
+    const pkgs = packages();
+    const n = Object.values(pkgs).reduce((a, b) => a + b, 0);
+    return [
+      { kind: "folder", id: "traces", name: "traces", meta: n + " files", when: "" },
+      { kind: "folder", id: "grokbot", name: "grokbot", meta: "settings", when: "" },
+      { kind: "file", id: "catalog.jsonld", name: "catalog.jsonld", meta: "JSON-LD", when: catalog && catalog.dateModified },
+      { kind: "file", id: "catalog.ttl", name: "catalog.ttl", meta: "Turtle", when: catalog && catalog.dateModified },
+    ];
+  }
+  if (cwd[0] === "traces" && cwd.length === 1) {
+    return Object.entries(packages())
+      .sort((a, b) => b[1] - a[1])
+      .map(([name, n]) => ({
+        kind: "folder",
+        id: name,
+        name,
+        meta: n + (n === 1 ? " file" : " files"),
+        when: latestIn(name),
+      }));
+  }
+  if (cwd[0] === "traces" && cwd[1]) {
+    return visibleTraces()
+      .filter((t) => (field(t, "package") || "unsorted") === cwd[1])
+      .slice(0, 400)
+      .map((t) => ({
+        kind: "file",
+        id: t.identifier,
+        name: field(t, "name", "schema:name") || t.identifier,
+        meta: field(t, "artifact") || "trace",
+        when: field(t, "dateModified", "dateCreated"),
+        trace: t,
+      }));
+  }
+  if (cwd[0] === "grokbot") {
+    return [{ kind: "file", id: "settings.jsonld", name: "settings.jsonld", meta: "JSON-LD", when: "" }];
+  }
+  return [];
+}
+
+function visibleTraces() {
+  return traces.filter((t) => {
+    if (!matchesSearch(t)) return false;
+    if (sparqlIDs && !sparqlIDs.has(t.identifier)) return false;
+    return true;
+  });
+}
+
+function renderCrumbs() {
+  const parts = ["/" + handle + "/records"].concat(cwd);
+  $("crumbs").innerHTML = parts.map((part, i) => {
+    const last = i === parts.length - 1;
+    const label = i === 0 ? "/" + handle + "/records" : part;
+    if (last) return `<span class="here">${escapeHtml(label)}</span>`;
+    return `<button type="button" data-depth="${i}">${escapeHtml(label)}</button><span class="sep">/</span>`;
+  }).join("");
+  $("crumbs").querySelectorAll("button").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      cwd = cwd.slice(0, Number(btn.dataset.depth));
+      selected = null;
+      renderDir();
+    });
+  });
+}
+
+function renderDir() {
+  const entries = dirEntries();
+  const q = $("q").value.trim();
+  $("traceMeta").textContent = q
+    ? fmt(entries.length) + " matches for “" + q + "”"
+    : fmt(entries.length) + (entries.length === 1 ? " item" : " items");
+  renderCrumbs();
+  $("listing").innerHTML = entries.map((e) => `
+    <button type="button" class="dir-row${selected && selected.id === e.id ? " on" : ""}" data-id="${escapeHtml(e.id)}" data-kind="${e.kind}">
+      <span class="ico">${e.kind === "folder" ? "▸" : "·"}</span>
+      <span class="name"><strong>${q && e.kind === "file" ? highlight(e.name) : escapeHtml(e.name)}</strong></span>
+      <span class="meta">${escapeHtml(e.meta || "")}</span>
+      <span class="when">${escapeHtml(when(e.when))}</span>
+    </button>`).join("") || `<div class="empty">This folder is empty.</div>`;
+  $("listing").querySelectorAll(".dir-row").forEach((btn) => {
+    btn.addEventListener("click", () => openEntry(btn.dataset.kind, btn.dataset.id));
+  });
+  if (!selected) renderPreview(null);
+}
+
+function openEntry(kind, id) {
+  if (kind === "folder") {
+    cwd = cwd.concat([id]);
+    selected = null;
+    renderDir();
+    return;
+  }
+  if (!queryTerms().length && cwd.length === 0 && (id === "catalog.jsonld" || id === "catalog.ttl")) {
+    selected = { id, kind: "catalog", name: id };
+    renderDir();
+    renderPreview(selected);
+    return;
+  }
+  if (id === "settings.jsonld") {
+    selected = { id, kind: "settings", name: id };
+    renderDir();
+    renderPreview(selected);
+    return;
+  }
+  const t = traces.find((x) => x.identifier === id);
+  selected = t ? { id, kind: "trace", name: field(t, "name", "schema:name") || id, trace: t } : { id, kind: "file", name: id };
+  renderDir();
+  renderPreview(selected);
+}
+
+function renderPreview(item) {
+  const el = $("preview");
+  if (!item) {
+    el.innerHTML = `<p class="hint">Open a folder or select a file.</p>`;
+    return;
+  }
+  if (item.kind === "catalog") {
+    const c = (catalog && catalog.counts) || {};
+    el.innerHTML = `<h2>${escapeHtml(item.name)}</h2>
+      <p class="mono path">/${handle}/records/${escapeHtml(item.name)}</p>
+      <dl class="kv">
+        <dt>Traces</dt><dd>${fmt(c.traces || traces.length)}</dd>
+        <dt>Packages</dt><dd>${fmt(c.packages || Object.keys(packages()).length)}</dd>
+      </dl>
+      <p><a class="btn ghost" href="/${handle}/records/${escapeHtml(item.name)}">Open raw</a></p>`;
+    return;
+  }
+  if (item.kind === "settings") {
+    const settings = grokDoc.json || grokDoc;
+    el.innerHTML = `<h2>settings.jsonld</h2>
+      <p class="mono path">/${handle}/records/grokbot/settings.jsonld</p>
+      <dl class="kv">
+        <dt>Tools</dt><dd>${escapeHtml(settings.localToolPermission || "—")}</dd>
+        <dt>MCP</dt><dd>${escapeHtml(Object.keys(settings.mcpCustomInstructions || {}).join(", ") || "none")}</dd>
+      </dl>`;
+    return;
+  }
+  const t = item.trace;
+  if (!t) {
+    el.innerHTML = `<p class="hint">Unknown file.</p>`;
+    return;
+  }
+  el.innerHTML = `<h2>${escapeHtml(field(t, "name", "schema:name") || t.identifier)}</h2>
+    <p class="mono path">/${handle}/records/traces/${escapeHtml(field(t, "package") || "unsorted")}/${escapeHtml(t.identifier)}.jsonld</p>
+    <p class="lede">${escapeHtml(field(t, "description", "oid:query", "query"))}</p>
+    <dl class="kv">
+      <dt>Work</dt><dd>${escapeHtml(field(t, "workType", "genre") || "—")}</dd>
+      <dt>Domain</dt><dd>${escapeHtml(field(t, "domain", "about") || "—")}</dd>
+      <dt>Kind</dt><dd>${escapeHtml(field(t, "artifact") || "—")}</dd>
+      <dt>Modified</dt><dd>${escapeHtml(when(field(t, "dateModified", "dateCreated")) || "—")}</dd>
+    </dl>`;
+}
+
 function renderStats() {
-  const c = catalog.counts || {};
+  const c = (catalog && catalog.counts) || {};
   $("stats").innerHTML = [
     [fmt(c.traces || traces.length), "Traces"],
     [fmt((c.byWorkType && Object.keys(c.byWorkType).length) || 0), "Work types"],
     [fmt(c.packages || 0), "Packages"],
-    ["$" + fmt(c.listPriceUSD || 0), "List (not for sale)"],
+    ["$" + fmt(c.listPriceUSD || 0), "List"],
   ].map(([n, l]) => `<div><strong>${n}</strong><span>${l}</span></div>`).join("");
 }
 
 function renderGrok(grok, me) {
   const settings = grok.json || grok;
   $("grokKV").innerHTML = [
-    ["Type", "oid:AgentSettings"],
     ["Tools", settings.localToolPermission || "—"],
     ["MCP", Object.keys(settings.mcpCustomInstructions || {}).join(", ") || "none"],
-    ["Package", grok.package || "openid-agent-identity"],
   ].map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("");
   $("podKV").innerHTML = [
-    ["Handle", me.handle || "mike"],
+    ["Handle", me.handle || handle],
     ["WebID", me.webId || ""],
-    ["Catalog", "catalog.jsonld · catalog.ttl"],
-    ["Updated", when(catalog.dateModified)],
+    ["Updated", when(catalog && catalog.dateModified)],
   ].map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("");
-}
-
-function facetButtons(el, field, counts) {
-  const keys = ["all", ...Object.keys(counts).sort((a, b) => counts[b] - counts[a])];
-  el.innerHTML = keys.map((k) =>
-    `<button type="button" data-val="${k}" class="${filters[field] === k ? "on" : ""}">${k} · ${k === "all" ? traces.length : counts[k]}</button>`
-  ).join("");
-  el.querySelectorAll("button").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      filters[field] = btn.dataset.val;
-      renderFacets();
-      renderTraces();
-    });
-  });
-}
-
-function renderFacets() {
-  const work = {}, domain = {}, pkg = {};
-  traces.forEach((t) => {
-    work[t.workType || t.genre] = (work[t.workType || t.genre] || 0) + 1;
-    domain[t.domain || t.about] = (domain[t.domain || t.about] || 0) + 1;
-    pkg[t.package] = (pkg[t.package] || 0) + 1;
-  });
-  facetButtons($("workTypes"), "workType", work);
-  facetButtons($("domains"), "domain", domain);
-  facetButtons($("packages"), "package", pkg);
 }
 
 function wrapSPARQL(raw) {
   const q = (raw || "").trim();
   if (!q) {
-    return `SELECT ?id ?name ?workType ?domain ?package ?artifact ?price WHERE {
-  ?id a oid:AgentTrace ;
-      schema:name ?name ;
-      oid:workType ?workType ;
-      oid:domain ?domain ;
-      oid:package ?package ;
-      oid:artifact ?artifact .
-  OPTIONAL { ?id schema:offers ?off . ?off schema:price ?price . }
-} ORDER BY DESC(?price) LIMIT 200`;
+    return `SELECT ?id ?name ?package WHERE {
+  ?id a oid:AgentTrace ; schema:name ?name ; oid:package ?package .
+} LIMIT 200`;
   }
   if (/^\s*(PREFIX|BASE|SELECT|ASK|CONSTRUCT|DESCRIBE)\b/i.test(q)) return q;
   const needle = q.replace(/\\/g, "\\\\").replace(/"/g, '\\"').toLowerCase();
-  return `SELECT ?id ?name ?workType ?domain ?package ?artifact ?price WHERE {
-  ?id a oid:AgentTrace ;
-      schema:name ?name ;
-      oid:workType ?workType ;
-      oid:domain ?domain ;
-      oid:package ?package ;
-      oid:artifact ?artifact .
-  OPTIONAL { ?id schema:offers ?off . ?off schema:price ?price . }
-  FILTER(
-    CONTAINS(LCASE(STR(?name)), "${needle}") ||
-    CONTAINS(LCASE(STR(?workType)), "${needle}") ||
-    CONTAINS(LCASE(STR(?domain)), "${needle}") ||
-    CONTAINS(LCASE(STR(?package)), "${needle}") ||
-    CONTAINS(LCASE(STR(?artifact)), "${needle}")
-  )
-} ORDER BY DESC(?price) LIMIT 200`;
+  return `SELECT ?id ?name ?package WHERE {
+  ?id a oid:AgentTrace ; schema:name ?name ; oid:package ?package .
+  FILTER(CONTAINS(LCASE(STR(?name)), "${needle}") || CONTAINS(LCASE(STR(?package)), "${needle}"))
+} LIMIT 200`;
 }
 
 function renderExamples() {
   const examples = [
     ["All traces", ""],
     ["Implementation", "implementation"],
-    ["Identity work", `SELECT ?name ?workType ?package WHERE {
-  ?id a oid:AgentTrace ; schema:name ?name ; oid:workType ?workType ; oid:package ?package .
-  FILTER(?workType = "identity-protocol")
-}`],
-    ["Packages", `SELECT DISTINCT ?package ?domain WHERE {
-  ?s oid:package ?package ; oid:domain ?domain
-} ORDER BY ?package`],
-    ["Over $20", `SELECT ?name ?price ?package WHERE {
-  ?id schema:name ?name ; oid:package ?package ; schema:offers ?off .
-  ?off schema:price ?price .
-  FILTER(?price >= 20)
-} ORDER BY DESC(?price)`],
   ];
   $("sparqlExamples").innerHTML = examples.map(([label]) =>
-    `<button type="button" data-ex="${escapeHtml(label)}">${label}</button>`
+    `<button type="button">${escapeHtml(label)}</button>`
   ).join("");
   $("sparqlExamples").querySelectorAll("button").forEach((btn, i) => {
     btn.addEventListener("click", () => {
@@ -227,11 +469,9 @@ function renderExamples() {
 
 async function runSPARQL(raw) {
   const query = wrapSPARQL(raw);
-  lastSparql = query;
-  $("sparqlCard").hidden = false;
+  $("sparqlSent").hidden = false;
   $("sparqlSent").textContent = query;
   $("sparqlMeta").textContent = "Running…";
-  $("sparqlResults").innerHTML = "";
   try {
     const res = await fetch(openidURL("/records/sparql"), {
       method: "POST",
@@ -246,8 +486,7 @@ async function runSPARQL(raw) {
     $("sparqlMeta").textContent = fmt(rows.length) + " binding" + (rows.length === 1 ? "" : "s");
     $("sparqlResults").innerHTML = renderSPARQLTable(vars, rows);
     sparqlIDs = idsFromBindings(rows);
-    if (sparqlIDs && sparqlIDs.size === 0) sparqlIDs = new Set();
-    renderTraces();
+    renderDir();
   } catch (err) {
     $("sparqlMeta").textContent = "Query failed";
     $("sparqlResults").innerHTML = `<p class="msg">${escapeHtml(err.message || String(err))}</p>`;
@@ -255,7 +494,6 @@ async function runSPARQL(raw) {
 }
 
 function renderSPARQLTable(vars, rows) {
-  if (!vars.length) return "<p class=\"hint\">No variables.</p>";
   if (!rows.length) return "<p class=\"hint\">No solutions.</p>";
   const head = vars.map((v) => `<th>?${escapeHtml(v)}</th>`).join("");
   const body = rows.slice(0, 200).map((row) =>
@@ -267,8 +505,7 @@ function renderSPARQLTable(vars, rows) {
 function cellValue(cell) {
   if (!cell) return "";
   const v = cell.value || "";
-  if (cell.type === "uri") return v.replace(/^https?:\/\/[^/]+/, "");
-  return v;
+  return cell.type === "uri" ? v.replace(/^https?:\/\/[^/]+/, "") : v;
 }
 
 function idsFromBindings(rows) {
@@ -280,7 +517,7 @@ function idsFromBindings(rows) {
       const v = cell.value || "";
       if (v.includes("/traces/") || v.includes("AgentTrace")) {
         saw = true;
-        const m = v.match(/\/([a-f0-9-]{8,})\.jsonld$/i) || v.match(/\/([A-Za-z0-9_-]+)\.jsonld$/);
+        const m = v.match(/\/([A-Za-z0-9_-]+)\.jsonld$/);
         if (m) ids.add(m[1]);
         const t = traces.find((x) => x["@id"] === v);
         if (t) ids.add(t.identifier);
@@ -290,56 +527,13 @@ function idsFromBindings(rows) {
   return saw ? ids : null;
 }
 
-function renderTraces() {
-  const rows = traces.filter((t) => {
-    if (filters.workType !== "all" && (t.workType || t.genre) !== filters.workType) return false;
-    if (filters.domain !== "all" && (t.domain || t.about) !== filters.domain) return false;
-    if (filters.package !== "all" && t.package !== filters.package) return false;
-    if (sparqlIDs && !sparqlIDs.has(t.identifier)) return false;
-    return true;
-  });
-  $("traceMeta").textContent = fmt(rows.length) + " of " + fmt(traces.length) + " JSON-LD records";
-  $("traceList").innerHTML = rows.slice(0, 200).map((t) => `
-    <button type="button" class="trace" data-id="${t.identifier}">
-      <span>
-        <strong>${escapeHtml(t.name || t.identifier)}</strong>
-        <small>${t.workType || t.genre} · ${t.domain || t.about} · ${t.package} · ${t.artifact}</small>
-      </span>
-      <span class="mono">$${t.offers && t.offers.price != null ? t.offers.price : "—"}</span>
-    </button>`).join("") || "<div>No traces in this filter.</div>";
-  $("traceList").querySelectorAll(".trace").forEach((btn) => {
-    btn.addEventListener("click", () => showDetail(btn.dataset.id));
-  });
-}
-
-function showDetail(id) {
-  const t = traces.find((x) => x.identifier === id);
-  if (!t) return;
-  $("detailCard").hidden = false;
-  $("detailTitle").textContent = t.name || id;
-  $("detailQuery").textContent = t.description || "";
-  $("detailPath").textContent = t.sourcePath || t["@id"];
-  const types = [].concat(t["@type"] || []);
-  $("detailKV").innerHTML = [
-    ["@type", types.join(", ")],
-    ["Work type", t.workType || t.genre],
-    ["Domain", t.domain || t.about],
-    ["Package", t.package],
-    ["Artifact", t.artifact],
-    ["Keywords", (t.keywords || []).join(", ")],
-    ["Turns", (t.userTurns || 0) + " you · " + (t.assistantTurns || 0) + " assistant"],
-    ["Offer", t.offers ? `USD ${t.offers.price} · ${String(t.offers.availability || "").split("/").pop()}` : "—"],
-    ["IRI", t["@id"]],
-  ].map(([k, v]) => `<dt>${k}</dt><dd>${escapeHtml(v || "—")}</dd>`).join("");
-  $("detailCard").scrollIntoView({ behavior: "smooth", block: "start" });
-}
-
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
 if (token) openArchive();
 else {
-  $("archive").hidden = true;
-  $("gate").hidden = false;
+  leaveArchive();
+  const pending = new URLSearchParams(location.search).get("q");
+  if (pending) $("q").value = pending;
 }

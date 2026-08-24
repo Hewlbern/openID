@@ -13,3 +13,7 @@ coverage.out
 *.test
 .idea/
 .vscode/
+.cursor/
+desktop/node_modules/
+desktop/src-tauri/target/
+.env*.local

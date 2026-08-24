@@ -14,9 +14,12 @@ cmd
 test
 assets
 scripts
+desktop
+bin
 *.md
 go.mod
 go.sum
 Dockerfile
 docker-compose.yml
 railway.toml
+.env*.local

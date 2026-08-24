@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>oid</title>
+  <link rel="stylesheet" href="./app.css" />
+</head>
+<body>
+  <header class="title" data-tauri-drag-region>
+    <span class="mark" aria-hidden="true"></span>
+    <span class="app-name">oid</span>
+    <span class="status" id="status">Connecting…</span>
+  </header>
+
+  <section class="sign-in" id="gate">
+    <span class="mark hero" aria-hidden="true"></span>
+    <h1>oid</h1>
+    <p class="lead" id="gateLead">Your pod. One identity.</p>
+    <form id="login" class="composer">
+      <input name="handle" value="mike" autocomplete="username" aria-label="Handle" />
+      <input name="password" type="password" autocomplete="current-password" placeholder="Password" aria-label="Password" />
+      <button type="submit" class="go" id="loginBtn" aria-label="Sign in">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 13 V4 M4.6 7.4 L8 4 L11.4 7.4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+      </button>
+    </form>
+    <p class="err" id="gateErr"></p>
+  </section>
+
+  <section class="shell" id="shell" hidden>
+    <div class="toolbar">
+      <label class="search">
+        <input id="q" type="search" placeholder="Search conversations" />
+      </label>
+      <span class="who" id="who"></span>
+      <span class="face" id="meFace">G</span>
+      <button type="button" class="ghost" id="logout">Sign out</button>
+    </div>
+    <div class="split">
+      <ul class="list" id="list"></ul>
+      <article class="detail" id="detail">
+        <div class="empty-state">
+          <span class="mark hero" aria-hidden="true"></span>
+          <p>Pick a conversation.</p>
+        </div>
+      </article>
+    </div>
+  </section>
+
+  <script src="./app.js"></script>
+</body>
+</html>

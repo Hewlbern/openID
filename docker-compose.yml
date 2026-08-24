@@ -1,24 +1,25 @@
-version: '3.8'
-
 services:
-  solid-server:
+  solid:
+    image: ghcr.io/hewlbern/openid:latest
     build:
       context: .
       dockerfile: Dockerfile
     ports:
-      - "3000:3000"
+      - "${SOLID_PORT:-3000}:3000"
     volumes:
       - solid-data:/data
     environment:
-      - SOLID_PORT=3000
-      - SOLID_STORAGE_PATH=/data
-      - SOLID_BASE_URL=http://localhost:3000
-      - SOLID_LOG_LEVEL=info
-      - IPFS_API=http://ipfs:5001
-      - AUDIT_BATCH_INTERVAL=30s
-      - SOLID_TOKEN_SECRET=change-me-in-production
-    depends_on:
-      - ipfs
+      SOLID_PORT: "3000"
+      SOLID_STORAGE_PATH: /data
+      SOLID_BASE_URL: ${SOLID_BASE_URL:-http://localhost:3000}
+      SOLID_TOKEN_SECRET: ${SOLID_TOKEN_SECRET:-change-me-in-production}
+      SOLID_LOG_LEVEL: ${SOLID_LOG_LEVEL:-info}
+      AUDIT_BATCH_INTERVAL: ${AUDIT_BATCH_INTERVAL:-30s}
+      IPFS_API: ${IPFS_API:-}
+      SOLID_SYNC_PEER: ${SOLID_SYNC_PEER:-}
+      SOLID_SYNC_HANDLE: ${SOLID_SYNC_HANDLE:-}
+      SOLID_SYNC_PASSWORD: ${SOLID_SYNC_PASSWORD:-}
+      SOLID_SYNC_INTERVAL: ${SOLID_SYNC_INTERVAL:-2m}
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/health"]
@@ -29,6 +30,7 @@ services:
 
   ipfs:
     image: ipfs/kubo:v0.32.1
+    profiles: ["ipfs"]
     ports:
       - "4001:4001"
       - "5001:5001"
@@ -36,20 +38,8 @@ services:
     volumes:
       - ipfs-data:/data/ipfs
     environment:
-      - IPFS_PROFILE=server
+      IPFS_PROFILE: server
     restart: unless-stopped
-
-  solid-tests:
-    build:
-      context: .
-      dockerfile: Dockerfile.test
-    volumes:
-      - .:/app
-    environment:
-      GO_TEST_FLAGS: "-v -count=1"
-    command: sh -c "go test ./internal/... ./test/... ${GO_TEST_FLAGS}"
-    profiles:
-      - test
 
 volumes:
   solid-data:

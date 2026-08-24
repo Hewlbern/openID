@@ -1,112 +1,160 @@
-const token = localStorage.getItem("openid.token");
-if (!token) location.replace("/dashboard");
+const tokenKey = "openid.token";
+const handleKey = "openid.handle";
+const $ = (id) => document.getElementById(id);
 
-const headers = {
-  Authorization: "Bearer " + token,
-  "Content-Type": "application/json",
-};
+let token = localStorage.getItem(tokenKey) || "";
+let account = null;
+let traces = [];
+let selected = null;
+
+function headers(extra) {
+  return Object.assign({ Accept: "application/json" }, extra || {}, token ? { Authorization: "Bearer " + token } : {});
+}
+
+function setStatus(text) {
+  $("status").textContent = text;
+}
 
 async function me() {
-  const res = await fetch(openidURL("/idp/accounts/me"), { headers });
+  if (!token) {
+    location.replace("/");
+    return null;
+  }
+  const res = await fetch(openidURL("/idp/accounts/me"), { headers: headers() });
   if (!res.ok) {
-    localStorage.removeItem("openid.token");
-    location.replace("/dashboard");
+    localStorage.removeItem(tokenKey);
+    location.replace("/");
     return null;
   }
   return res.json();
 }
 
-function row(label, href) {
-  const a = document.createElement("a");
-  a.className = "row";
-  a.href = href;
-  a.textContent = label;
-  return a;
-}
-
-async function load() {
-  const acc = await me();
-  if (!acc) return;
-  document.getElementById("hello").textContent = acc.name || acc.handle;
-  document.getElementById("who").textContent = acc.webId;
-  const pub = document.getElementById("publicLink");
-  pub.href = acc.publicUrl || "/i/" + acc.handle;
-  pub.textContent = (acc.publicUrl || "/i/" + acc.handle) + " →";
-  document.querySelector("#profileForm [name=name]").value = acc.name || "";
-  document.querySelector("#profileForm [name=bio]").value = acc.bio || "";
-
-  const list = document.getElementById("podList");
-  list.innerHTML = "";
-  const podRes = await fetch(openidURL("/" + acc.podPath), { headers: { Authorization: "Bearer " + token, Accept: "text/turtle" } });
-  if (podRes.ok) {
-    list.appendChild(row("Open pod container", openidURL("/" + acc.podPath)));
-    list.appendChild(row("WebID card", openidURL("/" + acc.podPath + "profile/card")));
+function field(t, ...keys) {
+  for (const k of keys) {
+    if (t[k] != null && t[k] !== "") return t[k];
   }
+  return "";
+}
 
-  const agents = await fetch(openidURL("/agents"), { headers }).then((r) => r.json()).catch(() => []);
-  const agentList = document.getElementById("agentList");
-  agentList.innerHTML = "";
-  (agents || []).forEach((a) => agentList.appendChild(row(a.name + " · " + a.webId, openidURL("/" + a.podPath + "profile/card"))));
+function hueFor(s) {
+  let n = 18;
+  String(s || "").split("").forEach((c) => { n = (n * 31 + c.charCodeAt(0)) % 360; });
+  return n;
+}
 
-  const events = await fetch(openidURL("/audit/events/"), { headers }).then((r) => r.json()).catch(() => []);
-  const auditList = document.getElementById("auditList");
-  auditList.innerHTML = "";
-  (events || []).slice().reverse().slice(0, 12).forEach((e) => {
-    auditList.appendChild(row((e.method || "") + " " + e.resource, openidURL("/audit/events/" + e.id + "/verify")));
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+function visible() {
+  const q = ($("q").value || "").toLowerCase().trim();
+  return traces.filter((t) => {
+    if (!q) return true;
+    const hay = [
+      field(t, "name", "schema:name"),
+      field(t, "package"),
+      field(t, "description"),
+      field(t, "workType"),
+    ].join(" ").toLowerCase();
+    return hay.includes(q);
   });
 }
 
-document.getElementById("profileForm").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  await fetch(openidURL("/idp/profile"), {
-    method: "PATCH",
-    headers,
-    body: JSON.stringify({
-      name: e.target.name.value,
-      bio: e.target.bio.value,
-    }),
+function renderList() {
+  const rows = visible();
+  if (!rows.length) {
+    $("list").innerHTML = `<li class="empty">${traces.length ? "No matches." : "No conversations yet."}</li>`;
+    return;
+  }
+  $("list").innerHTML = rows.slice(0, 400).map((t) => {
+    const id = t.identifier || "";
+    const name = field(t, "name", "schema:name") || id;
+    const pkg = field(t, "package");
+    return `<li data-id="${escapeHtml(id)}" class="${selected === id ? "on" : ""}">
+      <span class="orb" style="--h:${hueFor(pkg)}"></span>
+      <span><strong>${escapeHtml(name)}</strong>${pkg ? `<small>${escapeHtml(pkg)}</small>` : ""}</span>
+    </li>`;
+  }).join("");
+  $("list").querySelectorAll("li[data-id]").forEach((li) => {
+    li.addEventListener("click", () => {
+      selected = li.dataset.id;
+      renderList();
+      showDetail(selected);
+    });
   });
-  load();
-});
+}
 
-document.getElementById("putForm").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const acc = await me();
-  const path = e.target.path.value.replace(/^\/+/, "");
-  const res = await fetch(openidURL("/" + acc.podPath + path), {
-    method: "PUT",
-    headers: {
-      Authorization: "Bearer " + token,
-      "Content-Type": "text/plain",
-    },
-    body: e.target.body.value,
-  });
-  alert(res.ok ? "Saved" : "Could not save (" + res.status + ")");
-  load();
-});
+function showAccount() {
+  if (!account) return;
+  $("detail").innerHTML = `
+    <h1>${escapeHtml(account.name || account.handle)}</h1>
+    <div class="bubble">Your pod. One identity for you and the agents you allow.</div>
+    <div class="chips">
+      <span>${escapeHtml(account.handle || "")}</span>
+      <span>Solid</span>
+    </div>
+    <p class="mono">${escapeHtml(account.webId || "")}</p>
+    <p><a href="${escapeHtml(account.publicUrl || "/i/" + account.handle)}">Public page →</a></p>`;
+}
 
-document.getElementById("agentForm").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const res = await fetch(openidURL("/agents"), {
-    method: "POST",
-    headers,
-    body: JSON.stringify({ name: e.target.name.value || "agent" }),
-  });
-  const data = await res.json();
-  document.getElementById("agentSecret").textContent =
-    "token: " + data.token + "\nprivateKey: " + (data.privateKey || "") + "\nwebId: " + data.agent.webId;
-  load();
-});
+function showDetail(id) {
+  const t = traces.find((x) => x.identifier === id);
+  if (!t) {
+    showAccount();
+    return;
+  }
+  const desc = field(t, "description", "query");
+  $("detail").innerHTML = `
+    <h1>${escapeHtml(field(t, "name", "schema:name") || id)}</h1>
+    ${desc ? `<div class="bubble">${escapeHtml(desc)}</div>` : ""}
+    <div class="chips">
+      <span>${escapeHtml(field(t, "package") || "pod")}</span>
+      <span>${escapeHtml(field(t, "workType") || "work")}</span>
+      <span>${escapeHtml(field(t, "artifact") || "trace")}</span>
+    </div>
+    <p class="mono">${escapeHtml(t["@id"] || "")}</p>`;
+}
 
-document.getElementById("flush").addEventListener("click", async () => {
-  await fetch(openidURL("/audit/flush"), { method: "POST", headers });
-  load();
-});
+async function loadRecords(handle) {
+  try {
+    const res = await fetch(openidURL("/" + handle + "/records/cursor/transcripts.jsonld"), {
+      headers: headers({ Accept: "application/ld+json, application/json" }),
+    });
+    if (!res.ok) {
+      traces = [];
+      renderList();
+      showAccount();
+      return;
+    }
+    const doc = await res.json();
+    traces = Array.isArray(doc) ? doc : doc["@graph"] || [doc];
+  } catch (e) {
+    traces = [];
+  }
+  renderList();
+  if (selected) showDetail(selected);
+  else showAccount();
+}
 
-document.getElementById("logout").addEventListener("click", async () => {
+$("logout").addEventListener("click", async () => {
   await fetch(openidURL("/idp/logout"), { method: "POST" });
-  localStorage.removeItem("openid.token");
-  location.replace("/dashboard");
+  localStorage.removeItem(tokenKey);
+  location.replace("/");
 });
 
-load();
+$("q").addEventListener("input", renderList);
+$("meFace").addEventListener("click", () => {
+  selected = null;
+  renderList();
+  showAccount();
+});
+
+(async function boot() {
+  account = await me();
+  if (!account) return;
+  $("who").textContent = account.handle || account.name || "";
+  $("meFace").style.setProperty("--h", String(hueFor(account.handle)));
+  document.title = (account.handle || "oid") + " — oid";
+  setStatus(account.handle || "signed in");
+  await loadRecords(account.handle || "mike");
+})();

@@ -3,72 +3,40 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>OpenID — Passport</title>
+  <title>oid</title>
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
   <link rel="stylesheet" href="/static/styles.css" />
   <script src="/static/config.js"></script>
 </head>
 <body>
-  <div class="app-shell">
-    <aside class="side">
-      <a class="brand" href="/dashboard">
-        <span class="dots" aria-hidden="true"><i></i><i></i></span>
-        OPENID
-      </a>
-      <nav>
-        <a href="#overview" class="active">Overview</a>
-        <a href="#pod">Pod</a>
-        <a href="#agents">Agents</a>
-        <a href="#audit">Audit</a>
-        <a href="/records">Records</a>
-        <button class="linkish" id="logout" type="button">Log out</button>
-      </nav>
-    </aside>
-    <main class="main">
-      <section id="overview" class="grid">
-        <article class="panel">
-          <h3 id="hello">Your passport</h3>
-          <p id="who" class="mono">Loading…</p>
-          <p><a id="publicLink" href="/">Public page →</a></p>
-        </article>
-        <article class="panel">
-          <h3>Profile</h3>
-          <form id="profileForm">
-            <div class="field"><label>Name</label><input name="name" /></div>
-            <div class="field"><label>Bio</label><textarea name="bio"></textarea></div>
-            <button class="btn" type="submit">Save</button>
-          </form>
-        </article>
-      </section>
+  <header class="title">
+    <a class="brand" href="/app">
+      <span class="mark" aria-hidden="true"></span>
+      <span class="app-name">oid</span>
+    </a>
+    <span class="status" id="status"></span>
+  </header>
 
-      <section id="pod" class="panel" style="margin-top:16px">
-        <h3>Write to your pod</h3>
-        <p class="intro">Authenticated PUT into your Solid container. Public files go under public/.</p>
-        <form id="putForm">
-          <div class="field"><label>Path</label><input name="path" placeholder="public/note.txt" /></div>
-          <div class="field"><label>Contents</label><textarea name="body" placeholder="hello"></textarea></div>
-          <button class="btn" type="submit">Save resource</button>
-        </form>
-        <div class="list" id="podList"></div>
-      </section>
-
-      <section id="agents" class="panel" style="margin-top:16px">
-        <h3>AI agents</h3>
-        <form id="agentForm" class="claim" style="max-width:none">
-          <div class="claim-box"><input name="name" placeholder="Agent name" /></div>
-          <button class="btn" type="submit">Issue agent</button>
-        </form>
-        <div class="list" id="agentList"></div>
-        <pre class="mono" id="agentSecret"></pre>
-      </section>
-
-      <section id="audit" class="panel" style="margin-top:16px">
-        <h3>Audit trail</h3>
-        <button class="btn ghost" id="flush" type="button">Flush Merkle + OTS batch</button>
-        <div class="list" id="auditList"></div>
-      </section>
-    </main>
-  </div>
+  <section class="shell" id="shell">
+    <div class="toolbar">
+      <label class="search">
+        <input id="q" type="search" placeholder="Search conversations" />
+      </label>
+      <span class="who" id="who"></span>
+      <span class="face" id="meFace"></span>
+      <a class="ghost" href="/records">Records</a>
+      <button type="button" class="ghost" id="logout">Sign out</button>
+    </div>
+    <div class="split">
+      <ul class="convos" id="list"></ul>
+      <article class="detail" id="detail">
+        <div class="empty-state">
+          <span class="mark hero" aria-hidden="true"></span>
+          <p>Pick a conversation.</p>
+        </div>
+      </article>
+    </div>
+  </section>
   <script src="/static/app.js"></script>
 </body>
 </html>

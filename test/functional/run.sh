@@ -50,8 +50,11 @@ code=$(curl_code /tmp/ft_body "$BASE/health")
 assert_http "health status" "200" "$code"
 assert_contains "health body" '"status":"ok"' "$(cat /tmp/ft_body)"
 
-code=$(curl_code /tmp/ft_body "$BASE/")
-assert_http "root status" "200" "$code"
+code=$(curl_code /tmp/ft_body -H 'Accept: text/html' "$BASE/")
+assert_http "root dashboard" "200" "$code"
+assert_contains "root dashboard title" "Solid server" "$(cat /tmp/ft_body)"
+code=$(curl_code /tmp/ft_body -L "$BASE/")
+assert_http "root status redirect" "200" "$code"
 body=$(cat /tmp/ft_body)
 if [[ "$body" == *SolidGo* || "$body" == *OpenID* || "$body" == *'"agents"'* ]]; then
   green "PASS  root identity"; PASS=$((PASS+1))

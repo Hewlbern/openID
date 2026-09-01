@@ -126,22 +126,13 @@ function goYou() {
 }
 
 function railwayHonest() {
-  if (podCaps.conversationsAPI && podCaps.sparkToken) return "";
-  const bits = [];
-  if (!podCaps.conversationsAPI) {
-    bits.push(podCaps.conversationsError || "GET/POST /conversations is not on this Railway build");
-  }
-  if (!podCaps.sparkToken) {
-    bits.push(podCaps.sparkTokenError || "POST /idp/spark-token is not on this Railway build");
-  }
+  // Passport features run on this Vercel origin; Railway is only the Solid volume.
   return `
     <aside class="pod-banner" id="podBanner">
-      <strong>Railway is still on an older Solid build.</strong>
-      Login stays on this preview through the same-origin <span class="mono">/idp</span> proxy.
-      ${escapeHtml(bits.join(". "))}.
-      This page saves and lists through same-origin <span class="mono">/api/spark-conversations</span>,
-      which creates <span class="mono">${escapeHtml(sparkDir())}</span> with LDP PUT BasicContainer on Railway.
-      Share links and 30-day Spark connect tokens need a Railway redeploy of this branch.
+      <strong>Passport on this site · pod storage on Railway.</strong>
+      Login via <span class="mono">/idp</span>. Save/list via <span class="mono">/api/spark-conversations</span>
+      (creates <span class="mono">${escapeHtml(sparkDir())}</span>). Share via <span class="mono">/api/spark-share</span>
+      + <span class="mono">/share/c/…</span>. Spark tokens via <span class="mono">/api/spark-token</span> and <span class="mono">/mcp</span>.
       We never ask for a Google password.
     </aside>`;
 }
@@ -189,7 +180,7 @@ function showAccount() {
 
     <section class="walk-card" id="savedCard">
       <h2><span class="step">3</span> Saved conversations</h2>
-      <p>Listed from <span class="mono">${escapeHtml(sparkDir())}</span>${podCaps.listMode === "ldp" ? " (LDP — /conversations is not on Railway yet)" : ""}.</p>
+      <p>Listed from <span class="mono">${escapeHtml(sparkDir())}</span>${podCaps.listMode === "hosted-ldp" ? " via /api/spark-conversations" : ""}.</p>
       <ul class="dash-list" id="dashList"></ul>
     </section>
 
@@ -208,7 +199,7 @@ function showAccount() {
         <button type="button" class="btn ghost" id="sparkRevokeBtn">Revoke Spark token</button>
       </div>
       <label>Spark connect token</label>
-      <p class="token-box mono" id="sparkTokenBox">Optional scoped token. If Railway is still on the old Go build, mint will fail — use the session Bearer above.</p>
+      <p class="token-box mono" id="sparkTokenBox">Optional 30-day token (aud=spark-mcp). Minted on this site via /api/spark-token — or copy the session Bearer.</p>
       <p class="hint" id="sparkConnectHint"></p>
     </section>`;
   bindYouCard();
@@ -319,15 +310,21 @@ function renderSparkTokenBox(info) {
     box.textContent = "A connect token is active until " + (t.expires || "expiry") + ". The secret is only shown when you create it.";
     return;
   }
-  if (!podCaps.sparkToken && podCaps.probed) {
-    box.textContent = "Railway does not have /idp/spark-token yet. Copy the session Bearer above so Spark can push threads now.";
-    return;
-  }
-  box.textContent = "Optional. Create a 30-day token scoped to spark_* tools, or copy the session Bearer.";
+  box.textContent = "Optional. Create a 30-day token scoped to spark_* tools (/api/spark-token), or copy the session Bearer.";
+}
+
+async function sparkTokenFetch(path, opts) {
+  // Prefer Vercel-native mint; fall back to Railway /idp/spark-token when present.
+  const hosted = await fetch("/api/spark-token" + (path || ""), Object.assign({
+    headers: openidHeaders(opts && opts.headers),
+    credentials: "include",
+  }, opts || {}));
+  if (hosted.status !== 404) return hosted;
+  return openidFetch("/idp/spark-token" + (path || ""), opts);
 }
 
 async function loadSparkTokenStatus() {
-  const res = await openidFetch("/idp/spark-token");
+  const res = await sparkTokenFetch("", { method: "GET" });
   if (!res.ok) {
     podCaps.sparkToken = false;
     renderSparkTokenBox();
@@ -339,7 +336,7 @@ async function loadSparkTokenStatus() {
   renderSparkTokenBox(info);
   if (info.ttl) {
     const hint = $("sparkConnectHint");
-    if (hint && !hint.textContent) hint.textContent = "Lifetime " + info.ttl + " (SOLID_SPARK_TOKEN_TTL).";
+    if (hint && !hint.textContent) hint.textContent = "Lifetime " + info.ttl + " — minted on this site (/api/spark-token).";
   }
 }
 
@@ -369,34 +366,31 @@ function bindSparkConnect() {
   });
   if (mint) mint.addEventListener("click", async () => {
     setSparkHint("Minting…");
-    const res = await openidFetch("/idp/spark-token", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+    const res = await sparkTokenFetch("", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
     const body = await res.text();
     if (!res.ok) {
-      const honest = res.status === 404 || /Can only POST to containers/i.test(body) || /idp/i.test(body) && /register|login/.test(body)
-        ? "Railway does not have POST /idp/spark-token yet. Copy the session Bearer above — Spark can still save through this preview’s /mcp."
-        : body;
-      setSparkHint(honest, false);
+      setSparkHint(body || "Could not mint Spark token.", false);
       return;
     }
     let doc = {};
     try { doc = JSON.parse(body); } catch (e) {
-      setSparkHint("Railway returned something that is not a Spark token. Copy the session Bearer instead.", false);
+      setSparkHint("Unexpected mint response. Copy the session Bearer instead.", false);
       return;
     }
     if (!doc.token) {
-      setSparkHint("No token in that response. Railway is probably still on the old IDP. Copy the session Bearer.", false);
+      setSparkHint("No token in that response. Copy the session Bearer.", false);
       return;
     }
     sparkConnectToken = doc.token;
     try { sessionStorage.setItem("openid.sparkToken", sparkConnectToken); } catch (e) {}
     renderSparkTokenBox();
     const copied = await copyText(sparkConnectToken);
-    setSparkHint((copied ? "Created and copied. " : "Created. ") + "Expires " + (doc.expires || "") + ". Paste as Bearer in Spark.", true);
+    setSparkHint((copied ? "Created and copied. " : "Created. ") + "Expires " + (doc.expires || "") + ". Paste as Bearer in Spark with " + mcpURL() + ".", true);
   });
   if (revoke) revoke.addEventListener("click", async () => {
-    const res = await openidFetch("/idp/spark-token", { method: "DELETE" });
+    const res = await sparkTokenFetch("", { method: "DELETE" });
     if (!res.ok) {
-      setSparkHint(await res.text() || "Revoke is not on this Railway build yet.", false);
+      setSparkHint(await res.text() || "Revoke failed.", false);
       return;
     }
     sparkConnectToken = "";
@@ -410,10 +404,7 @@ function bindSparkConnect() {
 
 function shareHintFor(c) {
   if (c.share && c.share.url) return c.share.url;
-  if (!podCaps.conversationsAPI) {
-    return "Share/revoke needs POST /conversations/{id}/share on Railway. This thread is private on your pod at " + (c.resource || sparkDir() + c.id + ".json") + ".";
-  }
-  return "Unlisted link until you revoke it.";
+  return "Unlisted link until you revoke it. Share works on this site without Railway /conversations.";
 }
 
 function showSpark(c) {
@@ -534,19 +525,16 @@ async function loadConversations() {
 }
 
 async function probePod() {
-  const sparkTok = await openidFetch("/idp/spark-token");
+  const sparkTok = await sparkTokenFetch("", { method: "GET" });
   if (sparkTok.ok) {
     try {
       const j = await sparkTok.json();
       podCaps.sparkToken = !!(j && (Array.isArray(j.tokens) || j.mcpUrl || j.ttl || j.token));
-      if (!podCaps.sparkToken) podCaps.sparkTokenError = "GET /idp/spark-token returned the old IDP catalog, not a Spark grant";
     } catch (e) {
       podCaps.sparkToken = false;
-      podCaps.sparkTokenError = "GET /idp/spark-token was not JSON";
     }
   } else {
     podCaps.sparkToken = false;
-    podCaps.sparkTokenError = "GET /idp/spark-token → " + sparkTok.status;
   }
   podCaps.probed = true;
 }
@@ -574,13 +562,6 @@ async function refresh() {
   showDetail();
 }
 
-function honestShareFailure(status, body, c) {
-  if (status === 404 || status === 405 || /Can only POST to containers/i.test(body)) {
-    return "Share/revoke is not on this Railway build yet (POST /conversations hits “Can only POST to containers”). Redeploy this branch. The conversation stays private at " + (c.resource || sparkDir() + c.id + ".json") + ".";
-  }
-  return body || "Share failed.";
-}
-
 async function shareConversation(c, fromRow) {
   const hint = $("shareHint");
   if (c.share && c.share.url) {
@@ -589,13 +570,23 @@ async function shareConversation(c, fromRow) {
     if (fromRow) setStatus(ok ? "Copied share link" : c.share.url, true);
     return;
   }
-  const res = await openidFetch("/conversations/" + encodeURIComponent(c.id) + "/share", {
+  // Prefer Vercel-native share (public LDP snapshot). Fall back to Railway API.
+  let res = await fetch("/api/spark-share", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ public: false }),
+    headers: openidHeaders({ "Content-Type": "application/json" }),
+    credentials: "include",
+    body: JSON.stringify({ id: c.id, public: false }),
   });
+  if (res.status === 404) {
+    res = await openidFetch("/conversations/" + encodeURIComponent(c.id) + "/share", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ public: false }),
+    });
+  }
   if (!res.ok) {
-    const msg = honestShareFailure(res.status, await res.text(), c);
+    let msg = await res.text();
+    try { msg = JSON.parse(msg).error || msg; } catch (e) { /* keep */ }
     if (hint) hint.textContent = msg;
     else setStatus(msg, false);
     return;
@@ -613,13 +604,22 @@ async function shareConversation(c, fromRow) {
 }
 
 async function unshareConversation(c) {
-  const res = await openidFetch("/conversations/" + encodeURIComponent(c.id) + "/unshare", {
+  let res = await fetch("/api/spark-share", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: "{}",
+    headers: openidHeaders({ "Content-Type": "application/json" }),
+    credentials: "include",
+    body: JSON.stringify({ id: c.id, revoke: true }),
   });
+  if (res.status === 404) {
+    res = await openidFetch("/conversations/" + encodeURIComponent(c.id) + "/unshare", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    });
+  }
   if (!res.ok) {
-    const msg = honestShareFailure(res.status, await res.text(), c);
+    let msg = await res.text();
+    try { msg = JSON.parse(msg).error || msg; } catch (e) { /* keep */ }
     const hint = $("shareHint");
     if (hint) hint.textContent = msg;
     else setStatus(msg, false);

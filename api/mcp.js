@@ -1,14 +1,17 @@
 /**
  * Hosted MCP at /mcp (rewritten here). Spark talks to this origin; we write
  * the conversation into the Railway Solid pod with LDP PUTs to container
- * paths that end in /. Does not scrape Gemini — Spark supplies the thread.
+ * paths that end in /. Accepts session Bearer or Vercel-minted Spark connect
+ * tokens (aud=spark-mcp). Does not scrape Gemini — Spark supplies the thread.
  */
-const POD = (process.env.OPENID_POD || process.env.OPENID_API || "https://pod-production-ebe1.up.railway.app").replace(/\/$/, "");
+const { POD, podFetch, ensureContainer, accountMe } = require("./_lib/pod");
+const { parseSparkToken, isSparkTokenShape } = require("./_lib/jwt");
+const { shareConversation, unshareConversation } = require("./_lib/share");
 
 const SPARK_SAVE = `FIRST-CLASS tool for Gemini Spark. When the user asks to save, upload, store, or write this chat / thread / conversation to their Solid pod or OpenID, you MUST call this tool immediately with the full current conversation. Do not tell them to leave Spark or paste into /app — that UI is a fallback only. Pass title and the complete messages array as [{role, content|text, timestamp?}]. Include timezone-aware ISO-8601 timestamps on each message when Spark has them. Spark itself supplies the transcript; do not scrape Gemini. Writes conversations/spark/{id}.json (JSON-LD) plus a Turtle sidecar. Returns resourceUrl, webId, optional shareUrl, created/modified, and confirmation text to show the user.`;
 
 function sparkTools() {
-  const token = { type: "string", description: "Bearer token from /idp/login (or send Authorization: Bearer on /mcp)" };
+  const token = { type: "string", description: "Session Bearer from /idp/login or 30-day Spark connect token from /api/spark-token (Authorization: Bearer on /mcp)" };
   const id = { type: "string", description: "Conversation id returned by spark_save_conversation" };
   return [
     {
@@ -52,22 +55,8 @@ function cors(res) {
   res.setHeader("Access-Control-Expose-Headers", "Mcp-Session-Id");
 }
 
-function jwtPayload(token) {
-  try {
-    const parts = String(token || "").split(".");
-    if (parts.length < 2) return null;
-    const json = Buffer.from(parts[1].replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf8");
-    return JSON.parse(json);
-  } catch (e) {
-    return null;
-  }
-}
-
 function isSparkToken(token) {
-  const p = jwtPayload(token);
-  if (!p) return false;
-  const aud = Array.isArray(p.aud) ? p.aud : (p.aud ? [p.aud] : []);
-  return p.scope === "spark" || aud.includes("spark-mcp");
+  return isSparkTokenShape(token);
 }
 
 function bearer(req, args) {
@@ -78,13 +67,30 @@ function bearer(req, args) {
   return "";
 }
 
-async function podFetch(path, { method = "GET", token, headers = {}, body } = {}) {
-  const url = POD + (path.startsWith("/") ? path : "/" + path);
-  const h = { ...headers };
-  if (token) h.Authorization = "Bearer " + token;
-  const res = await fetch(url, { method, headers: h, body });
-  const text = await res.text();
-  return { status: res.status, text, headers: res.headers, url };
+/** Resolve Spark connect token → session Bearer for Railway LDP. */
+async function resolveLdpToken(token) {
+  if (!token) throw new Error("login required");
+  if (!isSparkTokenShape(token)) return token;
+  let spark;
+  try {
+    spark = parseSparkToken(token);
+  } catch (e) {
+    throw new Error("spark connect token invalid: " + e.message);
+  }
+  if (!spark.sessionToken) throw new Error("spark connect token missing session grant");
+  const revoked = await podFetch("/" + spark.handle + "/.openid/spark-revoked.json", {
+    token: spark.sessionToken,
+    headers: { Accept: "application/json" },
+  });
+  if (revoked.status < 400) {
+    try {
+      const doc = JSON.parse(revoked.text);
+      if ((doc.jtis || []).includes(spark.jti)) throw new Error("spark connect token revoked");
+    } catch (e) {
+      if (/revoked/.test(e.message)) throw e;
+    }
+  }
+  return spark.sessionToken;
 }
 
 function normalizeMessages(inMsgs) {
@@ -127,32 +133,8 @@ function turtle(resourceUrl, title, id, webId, now, msgs) {
   return ttl;
 }
 
-async function ensureContainer(token, path) {
-  if (!path.endsWith("/")) path += "/";
-  const res = await podFetch(path, {
-    method: "PUT",
-    token,
-    headers: {
-      "Content-Type": "text/turtle",
-      Link: '<http://www.w3.org/ns/ldp#BasicContainer>; rel="type"',
-    },
-    body: "# container\n",
-  });
-  if (res.status === 200 || res.status === 201 || res.status === 204 || res.status === 409) return;
-  const got = await podFetch(path, { token, headers: { Accept: "text/turtle, */*" } });
-  if (got.status < 400) return;
-  throw new Error("ensure container " + path + " -> " + res.status + " " + res.text);
-}
-
-async function accountMe(token) {
-  const res = await podFetch("/idp/accounts/me", { token, headers: { Accept: "application/json" } });
-  if (res.status >= 400) throw new Error("login required: " + res.text);
-  const acc = JSON.parse(res.text);
-  if (!acc.handle) throw new Error("account missing handle");
-  return acc;
-}
-
 async function sparkSave(args, token) {
+  token = await resolveLdpToken(token);
   const acc = await accountMe(token);
   let messages = normalizeMessages(args.messages);
   if (!messages.length && args.text) messages = [{ role: "user", text: String(args.text) }];
@@ -228,20 +210,35 @@ async function sparkSave(args, token) {
 }
 
 async function sparkList(token) {
+  token = await resolveLdpToken(token);
   const api = await podFetch("/conversations", { token, headers: { Accept: "application/json" } });
   if (api.status < 400) {
     try { return JSON.parse(api.text); } catch (e) { return { text: api.text }; }
   }
   const acc = await accountMe(token);
+  await ensureContainer(token, "/" + acc.handle + "/conversations/");
+  await ensureContainer(token, "/" + acc.handle + "/conversations/spark/");
   const listing = await podFetch("/" + acc.handle + "/conversations/spark/", {
     token,
     headers: { Accept: "text/turtle" },
   });
   if (listing.status >= 400) return { conversations: [] };
-  return { container: listing.text };
+  const ids = [...listing.text.matchAll(/conversations\/spark\/([A-Za-z0-9-]+)\.json/g)].map((m) => m[1]);
+  const out = [];
+  for (const id of [...new Set(ids)]) {
+    const g = await podFetch("/" + acc.handle + "/conversations/spark/" + id + ".json", {
+      token,
+      headers: { Accept: "application/ld+json, application/json" },
+    });
+    if (g.status < 400) {
+      try { out.push(JSON.parse(g.text)); } catch (e) { /* skip */ }
+    }
+  }
+  return { conversations: out };
 }
 
 async function sparkGet(token, id) {
+  token = await resolveLdpToken(token);
   const api = await podFetch("/conversations/" + encodeURIComponent(id), { token, headers: { Accept: "application/json" } });
   if (api.status < 400) {
     try { return JSON.parse(api.text); } catch (e) { return { text: api.text }; }
@@ -278,17 +275,18 @@ async function callTool(name, args, token, req) {
     case "spark_get_conversation":
       if (!args || !args.id) throw new Error("id is required");
       return sparkGet(token, args.id);
-    case "spark_share_conversation":
+    case "spark_share_conversation": {
+      if (!args || !args.id) throw new Error("id is required");
+      const ldp = await resolveLdpToken(token);
+      const origin = (req.headers["x-forwarded-proto"] && req.headers["x-forwarded-host"])
+        ? req.headers["x-forwarded-proto"] + "://" + req.headers["x-forwarded-host"]
+        : (req.headers.origin || "");
+      return shareConversation(ldp, args.id, origin);
+    }
     case "spark_unshare_conversation": {
-      const path = "/conversations/" + encodeURIComponent(args.id) + (name === "spark_share_conversation" ? "/share" : "/unshare");
-      const res = await podFetch(path, {
-        method: "POST",
-        token,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ public: !!(args && args.public) }),
-      });
-      if (res.status >= 400) throw new Error(res.text);
-      try { return JSON.parse(res.text); } catch (e) { return { text: res.text }; }
+      if (!args || !args.id) throw new Error("id is required");
+      const ldp = await resolveLdpToken(token);
+      return unshareConversation(ldp, args.id);
     }
     default:
       return null;

@@ -63,9 +63,16 @@ func defaultHTTP() *http.Client {
 
 func (s *Service) jsonLDContext() any {
 	return map[string]any{
-		"@vocab": "https://schema.org/",
-		"schema": "https://schema.org/",
-		"openid": "https://www.w3.org/ns/solid/terms#",
+		"@vocab":  "https://schema.org/",
+		"schema":  "https://schema.org/",
+		"dcterms": "http://purl.org/dc/terms/",
+		"foaf":    "http://xmlns.com/foaf/0.1/",
+		"solid":   "http://www.w3.org/ns/solid/terms#",
+		"created": map[string]any{"@id": "dcterms:created", "@type": "xsd:dateTime"},
+		"updated": map[string]any{"@id": "dcterms:modified", "@type": "xsd:dateTime"},
+		"dateCreated":  map[string]any{"@id": "schema:dateCreated", "@type": "xsd:dateTime"},
+		"dateModified": map[string]any{"@id": "schema:dateModified", "@type": "xsd:dateTime"},
+		"xsd": "http://www.w3.org/2001/XMLSchema#",
 	}
 }
 
@@ -142,22 +149,50 @@ func (s *Service) writePublicACL(ctx context.Context, actor *actor, resource str
 func (s *Service) metadataTurtle(c *Conversation) string {
 	g := rdf.NewGraph()
 	prefixes := map[string]string{
-		"schema": "https://schema.org/",
-		"dct":    "http://purl.org/dc/terms/",
-		"solid":  "http://www.w3.org/ns/solid/terms#",
+		"schema":  "https://schema.org/",
+		"dcterms": "http://purl.org/dc/terms/",
+		"foaf":    "http://xmlns.com/foaf/0.1/",
+		"solid":   "http://www.w3.org/ns/solid/terms#",
+		"xsd":     "http://www.w3.org/2001/XMLSchema#",
 	}
 	id := s.resourceURL(c.Resource)
+	created := c.Created.UTC().Format(time.RFC3339)
+	modified := c.Updated.UTC().Format(time.RFC3339)
 	g.AddIRI(id, "http://www.w3.org/1999/02/22-rdf-syntax-ns#type", "https://schema.org/Conversation")
 	g.AddLiteral(id, "https://schema.org/name", c.Title)
 	g.AddLiteral(id, "https://schema.org/identifier", c.ID)
-	g.AddLiteral(id, "http://purl.org/dc/terms/created", c.Created.UTC().Format(time.RFC3339))
-	g.AddLiteral(id, "http://purl.org/dc/terms/modified", c.Updated.UTC().Format(time.RFC3339))
-	g.AddLiteral(id, "https://schema.org/creator", c.Owner)
+	xsdDateTime := "http://www.w3.org/2001/XMLSchema#dateTime"
+	g.AddTypedLiteral(id, "http://purl.org/dc/terms/created", created, xsdDateTime)
+	g.AddTypedLiteral(id, "http://purl.org/dc/terms/modified", modified, xsdDateTime)
+	g.AddTypedLiteral(id, "https://schema.org/dateCreated", created, xsdDateTime)
+	g.AddTypedLiteral(id, "https://schema.org/dateModified", modified, xsdDateTime)
+	if c.Owner != "" {
+		g.AddIRI(id, "https://schema.org/creator", c.Owner)
+		g.AddIRI(id, "http://xmlns.com/foaf/0.1/maker", c.Owner)
+	}
 	g.AddLiteral(id, "http://purl.org/dc/terms/source", firstNonEmpty(c.Source, SourceGeminiSpark))
 	if c.SourceURL != "" {
 		g.AddIRI(id, "https://schema.org/url", c.SourceURL)
 	}
 	g.AddIRI(id, "https://schema.org/encoding", s.resourceURL(c.Resource))
+	for i, m := range c.Messages {
+		msgID := fmt.Sprintf("%s#msg-%d", id, i+1)
+		g.AddIRI(id, "https://schema.org/hasPart", msgID)
+		g.AddIRI(msgID, "http://www.w3.org/1999/02/22-rdf-syntax-ns#type", "https://schema.org/Message")
+		g.AddLiteral(msgID, "https://schema.org/text", m.Text)
+		role := normalizeRole(m.Role)
+		g.AddLiteral(msgID, "https://schema.org/author", role)
+		if role == "assistant" {
+			g.AddLiteral(msgID, "http://xmlns.com/foaf/0.1/Agent", "gemini-spark")
+		} else if c.Owner != "" {
+			g.AddIRI(msgID, "http://xmlns.com/foaf/0.1/maker", c.Owner)
+		}
+		if m.Timestamp != nil {
+			ts := m.Timestamp.Format(time.RFC3339)
+			g.AddTypedLiteral(msgID, "https://schema.org/dateCreated", ts, xsdDateTime)
+			g.AddTypedLiteral(msgID, "http://purl.org/dc/terms/created", ts, xsdDateTime)
+		}
+	}
 	return rdf.SerializeTurtle(g, prefixes)
 }
 
@@ -165,7 +200,17 @@ func (s *Service) decorate(c *Conversation) {
 	c.Context = s.jsonLDContext()
 	c.Type = "Conversation"
 	c.JSONLDID = s.resourceURL(c.Resource)
+	c.Name = c.Title
+	c.Creator = c.Owner
+	c.DateCreated = c.Created.UTC().Format(time.RFC3339)
+	c.DateModified = c.Updated.UTC().Format(time.RFC3339)
 	c.MetaTTL = s.resourceURL(s.metaPath(c.PodPath, c.ID))
+	for i := range c.Messages {
+		if c.Messages[i].Text == "" && c.Messages[i].Content != "" {
+			c.Messages[i].Text = c.Messages[i].Content
+		}
+		c.Messages[i].Content = "" // avoid duplicating in stored JSON-LD
+	}
 	if rec, ok := s.lookupShare(c.ID); ok {
 		c.Shared = &Share{
 			Token:   rec.Token,
@@ -174,6 +219,39 @@ func (s *Service) decorate(c *Conversation) {
 			Created: rec.Created,
 		}
 	}
+}
+
+// ResultOf builds the Spark-facing confirmation payload.
+func (s *Service) ResultOf(c *Conversation) *SaveResult {
+	if c == nil {
+		return nil
+	}
+	s.decorate(c)
+	res := &SaveResult{
+		OK:           true,
+		ID:           c.ID,
+		Title:        c.Title,
+		ResourceURL:  s.resourceURL(c.Resource),
+		MetaTTLURL:   c.MetaTTL,
+		WebID:        c.Owner,
+		Pod:          s.BaseURL + "/" + strings.TrimPrefix(c.PodPath, "/"),
+		Source:       firstNonEmpty(c.Source, SourceGeminiSpark),
+		Created:      c.Created.UTC(),
+		Modified:     c.Updated.UTC(),
+		MessageCount: len(c.Messages),
+		Conversation: c,
+	}
+	if c.Shared != nil {
+		res.ShareURL = c.Shared.URL
+	}
+	res.Confirmation = fmt.Sprintf(
+		"Saved “%s” to your Solid pod as %s (%d messages, source=%s). WebID %s. Created %s.",
+		c.Title, res.ResourceURL, res.MessageCount, res.Source, c.Owner, res.Created.Format(time.RFC3339),
+	)
+	if res.ShareURL != "" {
+		res.Confirmation += " Share: " + res.ShareURL
+	}
+	return res
 }
 
 func (s *Service) shareURL(rec shareRecord) string {

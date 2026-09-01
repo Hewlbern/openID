@@ -109,7 +109,7 @@ function showAccount() {
     </div>
     <p class="mono">${escapeHtml(account.webId || "")}</p>
     <p><a href="${escapeHtml(account.publicUrl || "/i/" + account.handle)}">Public page →</a></p>
-    <p class="hint">Save a Gemini Spark conversation with <strong>Save</strong>, or connect Spark’s custom MCP to <span class="mono">${escapeHtml(location.origin)}/mcp</span>.</p>`;
+    <p class="hint">In Gemini Spark: Settings → Custom Connected Apps / MCP → URL <span class="mono">${escapeHtml(location.origin)}/mcp</span> with the Bearer token from this login. Then say <strong>Save this conversation to my Solid pod.</strong> The Save button here is a paste fallback.</p>`;
 }
 
 function showSpark(c) {
@@ -170,14 +170,30 @@ function showDetail() {
   showAccount();
 }
 
+async function listViaLDP() {
+  if (!account || !account.handle) return [];
+  const res = await openidFetch("/" + account.handle + "/conversations/spark/", {
+    headers: { Accept: "text/turtle" },
+  });
+  if (!res.ok) return [];
+  const ttl = await res.text();
+  const ids = [...ttl.matchAll(/conversations\/spark\/([A-Za-z0-9-]+)\.json/g)].map((m) => m[1]);
+  const out = [];
+  for (const id of [...new Set(ids)]) {
+    const g = await openidFetch("/" + account.handle + "/conversations/spark/" + id + ".json");
+    if (g.ok) out.push(await g.json());
+  }
+  return out;
+}
+
 async function loadConversations() {
   const res = await openidFetch("/conversations");
-  if (!res.ok) {
-    conversations = [];
+  if (res.ok) {
+    const doc = await res.json();
+    conversations = Array.isArray(doc) ? doc : doc.conversations || [];
     return;
   }
-  const doc = await res.json();
-  conversations = Array.isArray(doc) ? doc : doc.conversations || [];
+  conversations = await listViaLDP();
 }
 
 async function loadRecords(handle) {
@@ -272,26 +288,163 @@ saveModal.addEventListener("click", (e) => {
   if (e.target === saveModal) saveModal.classList.remove("open");
 });
 
+async function ensureLDPContainer(path) {
+  if (!path.endsWith("/")) path += "/";
+  const res = await openidFetch(path, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "text/turtle",
+      Link: '<http://www.w3.org/ns/ldp#BasicContainer>; rel="type"',
+    },
+    body: "# container\n",
+  });
+  if (!res.ok && res.status !== 200 && res.status !== 201 && res.status !== 204) {
+    throw new Error("container " + path + " " + res.status + " " + (await res.text()));
+  }
+}
+
+function parsePasteMessages(text) {
+  const lines = String(text || "").split("\n");
+  const msgs = [];
+  let cur = null;
+  const turn = /^\s*(?:\*{0,2})(user|human|you|assistant|gemini|spark|model|system)(?:\*{0,2})\s*:\s*(?:\*{0,2})\s*(.*)$/i;
+  for (const line of lines) {
+    const m = line.match(turn);
+    if (m) {
+      if (cur && cur.text.trim()) msgs.push(cur);
+      const role = /assistant|gemini|spark|model/i.test(m[1]) ? "assistant" : /system/i.test(m[1]) ? "system" : "user";
+      cur = { role, text: m[2] || "" };
+      continue;
+    }
+    if (cur) cur.text += (cur.text ? "\n" : "") + line;
+  }
+  if (cur && cur.text.trim()) msgs.push(cur);
+  if (!msgs.length && String(text || "").trim()) {
+    msgs.push({ role: "user", text: String(text).trim() });
+  }
+  return msgs.map((m) => ({ role: m.role, text: m.text.trim() }));
+}
+
+async function saveViaLDP(payload) {
+  const handle = account && account.handle;
+  if (!handle) throw new Error("signed-in handle required");
+  const id = (crypto.randomUUID && crypto.randomUUID()) || String(Date.now());
+  const now = new Date().toISOString();
+  let messages = payload.messages || [];
+  if (!messages.length && payload.text) {
+    try {
+      const parsed = JSON.parse(payload.text);
+      if (Array.isArray(parsed)) messages = parsed;
+      else if (parsed && Array.isArray(parsed.messages)) messages = parsed.messages;
+    } catch (e) {
+      messages = parsePasteMessages(payload.text);
+    }
+  }
+  messages = messages.map((m) => ({
+    role: m.role || "user",
+    text: m.text || m.content || "",
+    timestamp: m.timestamp || m.time || undefined,
+  })).filter((m) => m.text);
+  if (!messages.length) throw new Error("messages or transcript required");
+  const title = payload.title || (messages[0] && messages[0].text.slice(0, 80)) || "Untitled conversation";
+  await ensureLDPContainer("/" + handle + "/conversations/");
+  await ensureLDPContainer("/" + handle + "/conversations/spark/");
+  const resource = "/" + handle + "/conversations/spark/" + id + ".json";
+  const ttlPath = "/" + handle + "/conversations/spark/" + id + ".ttl";
+  const resourceUrl = location.origin + resource;
+  const doc = {
+    "@context": {
+      "@vocab": "https://schema.org/",
+      schema: "https://schema.org/",
+      dcterms: "http://purl.org/dc/terms/",
+      foaf: "http://xmlns.com/foaf/0.1/",
+      xsd: "http://www.w3.org/2001/XMLSchema#",
+      created: { "@id": "dcterms:created", "@type": "xsd:dateTime" },
+      updated: { "@id": "dcterms:modified", "@type": "xsd:dateTime" },
+      dateCreated: { "@id": "schema:dateCreated", "@type": "xsd:dateTime" },
+      dateModified: { "@id": "schema:dateModified", "@type": "xsd:dateTime" },
+    },
+    "@type": "Conversation",
+    "@id": resourceUrl,
+    id,
+    title,
+    name: title,
+    source: "gemini-spark",
+    sourceUrl: payload.source_url || "",
+    created: now,
+    updated: now,
+    dateCreated: now,
+    dateModified: now,
+    messages,
+    owner: account.webId,
+    creator: account.webId,
+    podPath: handle + "/",
+    resource: handle + "/conversations/spark/" + id + ".json",
+    metaTtl: location.origin + ttlPath,
+  };
+  const jsonRes = await openidFetch(resource, {
+    method: "PUT",
+    headers: { "Content-Type": "application/ld+json" },
+    body: JSON.stringify(doc, null, 2),
+  });
+  if (!jsonRes.ok) throw new Error(await jsonRes.text());
+  const ttl = [
+    "@prefix schema: <https://schema.org/> .",
+    "@prefix dcterms: <http://purl.org/dc/terms/> .",
+    "@prefix foaf: <http://xmlns.com/foaf/0.1/> .",
+    "@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .",
+    "",
+    "<" + resourceUrl + "> a schema:Conversation ;",
+    "  schema:name " + JSON.stringify(title) + " ;",
+    "  dcterms:created " + JSON.stringify(now) + "^^xsd:dateTime ;",
+    "  dcterms:modified " + JSON.stringify(now) + "^^xsd:dateTime ;",
+    "  dcterms:source \"gemini-spark\" ;",
+    "  schema:creator <" + (account.webId || "") + "> .",
+  ].join("\n");
+  await openidFetch(ttlPath, {
+    method: "PUT",
+    headers: { "Content-Type": "text/turtle" },
+    body: ttl,
+  });
+  return doc;
+}
+
 $("saveForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   const hint = $("saveHint");
   hint.textContent = "Saving…";
+  hint.className = "hint";
+  const payload = {
+    title: $("saveTitle").value,
+    source_url: $("saveURL").value,
+    text: $("saveText").value,
+    source: "gemini-spark",
+  };
+  let saved = null;
   const res = await openidFetch("/conversations", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      title: $("saveTitle").value,
-      source_url: $("saveURL").value,
-      text: $("saveText").value,
-      source: "gemini-spark",
-    }),
+    body: JSON.stringify(payload),
   });
-  if (!res.ok) {
-    hint.textContent = await res.text();
-    hint.className = "hint bad";
-    return;
+  if (res.ok) {
+    saved = await res.json();
+    if (saved.conversation) saved = Object.assign({}, saved.conversation, saved);
+  } else {
+    const errText = await res.text();
+    if (res.status === 404 || res.status === 405 || /Can only POST to containers/i.test(errText)) {
+      try {
+        saved = await saveViaLDP(payload);
+      } catch (ldpErr) {
+        hint.textContent = String(ldpErr.message || ldpErr);
+        hint.className = "hint bad";
+        return;
+      }
+    } else {
+      hint.textContent = errText;
+      hint.className = "hint bad";
+      return;
+    }
   }
-  const saved = await res.json();
   saveModal.classList.remove("open");
   $("saveText").value = "";
   $("saveURL").value = "";

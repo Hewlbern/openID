@@ -263,6 +263,7 @@ func TestPodFromWebID(t *testing.T) {
 
 func TestMetadataTurtle(t *testing.T) {
 	svc, _, _ := testService(t)
+	ts := time.Date(2026, 9, 1, 1, 2, 3, 0, time.UTC)
 	ttl := svc.metadataTurtle(&Conversation{
 		ID:       "x",
 		Title:    "Hello",
@@ -271,8 +272,80 @@ func TestMetadataTurtle(t *testing.T) {
 		Created:  time.Unix(0, 0).UTC(),
 		Updated:  time.Unix(0, 0).UTC(),
 		Source:   SourceGeminiSpark,
+		Messages: []Message{{Role: "user", Text: "hi", Timestamp: &ts}},
 	})
-	if !strings.Contains(ttl, "Hello") || !strings.Contains(ttl, "schema:Conversation") && !strings.Contains(ttl, "schema.org/Conversation") {
+	if !strings.Contains(ttl, "Hello") || (!strings.Contains(ttl, "schema:Conversation") && !strings.Contains(ttl, "schema.org/Conversation")) {
 		t.Fatalf("ttl %s", ttl)
+	}
+	if !strings.Contains(ttl, "2026-09-01T01:02:03Z") {
+		t.Fatalf("message timestamp missing from ttl: %s", ttl)
+	}
+	if !strings.Contains(ttl, "XMLSchema#dateTime") && !strings.Contains(ttl, "xsd:dateTime") {
+		t.Fatalf("xsd:dateTime missing: %s", ttl)
+	}
+}
+
+func TestSaveTimestampsJSONAndTurtle(t *testing.T) {
+	svc, _, store := testService(t)
+	_, act := registerHuman(t, svc.IDP)
+	msgTime := time.Date(2026, 3, 15, 9, 30, 0, 0, time.FixedZone("AEST", 10*3600))
+	c, err := svc.Save(context.Background(), act, SaveInput{
+		Title: "Timed",
+		Messages: []Message{
+			{Role: "user", Text: "morning", Timestamp: &msgTime},
+			{Role: "assistant", Content: "noted"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Created.IsZero() || c.Updated.IsZero() || c.DateCreated == "" || c.DateModified == "" {
+		t.Fatalf("conversation times: %#v", c)
+	}
+	if c.Messages[0].Timestamp == nil || !c.Messages[0].Timestamp.UTC().Equal(msgTime.UTC()) {
+		t.Fatalf("message timestamp %#v", c.Messages[0].Timestamp)
+	}
+	if !strings.HasSuffix(c.Resource, ".json") || !strings.Contains(c.Resource, "conversations/spark/") {
+		t.Fatalf("resource path %s", c.Resource)
+	}
+
+	got, err := store.Get(context.Background(), c.Resource)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(got.Body)
+	if !strings.Contains(body, `"created"`) || !strings.Contains(body, `"dateCreated"`) || !strings.Contains(body, `"source": "gemini-spark"`) {
+		t.Fatalf("json missing time/source fields\n%s", body)
+	}
+	if !strings.Contains(body, "2026-03-15T09:30:00+10:00") && !strings.Contains(body, "2026-03-14T23:30:00Z") {
+		t.Fatalf("json missing message timestamp\n%s", body)
+	}
+
+	ttlRes, err := store.Get(context.Background(), svc.metaPath(act.PodPath, c.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ttl := string(ttlRes.Body)
+	for _, needle := range []string{"purl.org/dc/terms/created", "purl.org/dc/terms/modified", "schema.org/dateCreated", "gemini-spark", act.WebID} {
+		if !strings.Contains(ttl, needle) && !strings.Contains(ttl, strings.ReplaceAll(needle, "purl.org/dc/terms/", "dcterms:")) {
+			t.Fatalf("ttl missing %s\n%s", needle, ttl)
+		}
+	}
+	if !strings.Contains(ttl, "2026-03-14T23:30:00Z") && !strings.Contains(ttl, "2026-03-15T09:30:00+10:00") {
+		t.Fatalf("ttl missing message timestamp\n%s", ttl)
+	}
+
+	dir, err := store.Get(context.Background(), act.PodPath+"conversations/")
+	if err != nil || !dir.IsContainer {
+		t.Fatalf("conversations/ container: %v %#v", err, dir)
+	}
+	spark, err := store.Get(context.Background(), act.PodPath+"conversations/spark/")
+	if err != nil || !spark.IsContainer {
+		t.Fatalf("conversations/spark/ container: %v %#v", err, spark)
+	}
+
+	result := svc.ResultOf(c)
+	if result.ResourceURL == "" || result.WebID != act.WebID || result.Confirmation == "" {
+		t.Fatalf("result %#v", result)
 	}
 }

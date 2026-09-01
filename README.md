@@ -78,23 +78,38 @@ curl -s -X POST http://localhost:3000/idp/register \
 
 ## Save and share Gemini Spark conversations
 
-OpenID already is a Solid server. Spark talks to this pod’s MCP and writes the thread into the signed-in human’s pod at `{pod}/conversations/spark/{id}.json` (plus Turtle metadata). Every save, share, and revoke is an audited LDP write.
+The happy path is **inside Gemini Spark**. Spark is a custom MCP client of this OpenID server. You stay in the chat; Spark calls `spark_save_conversation` with the current thread. The passport **Save** dialog on `/app` is a paste fallback only. OpenID does not scrape Gemini.
 
-Google does **not** publish a Gemini bulk export API. If a `g.co/gemini/share/…` link is not publicly fetchable, paste the transcript.
+Writes land at `{pod}/{handle}/conversations/spark/{id}.json` (JSON-LD transcript) plus `{id}.ttl` (Conversation / Message RDF with `dcterms:created`, `dcterms:modified`, `schema:dateCreated`, per-message timestamps, `foaf`/`schema` roles, owner WebID, `source=gemini-spark`). Containers `conversations/` and `conversations/spark/` are created first (paths end with `/`). Every write is an audited LDP PUT (IPFS / OpenTimestamps).
 
-1. Run the server: `go run ./cmd/server -port 3000 -storage ./data`
-2. Register or log in, then open the passport at `/app`.
-3. Click **Save**, paste a Spark-style transcript (`**User:**` / `**Gemini:**`) or a public Gemini share URL.
-4. Click **Share**, copy `/share/c/{id}`. Open that URL logged out — it is read-only until you revoke it.
-5. Connect Gemini Spark’s custom MCP to `https://<origin>/mcp` (local: `http://localhost:3000/mcp`). Authenticate with a Bearer token from `openid_login` / `POST /idp/login`, or pass `token` on each tool.
+### Connect Spark (do this once)
+
+1. Register or log in at `https://<origin>/` (hosted: https://identity-two-plum.vercel.app ) and copy the Bearer token from `/idp/login` (or the token shown after you sign in).
+2. In Gemini Spark open **Settings → Custom Connected Apps / MCP**.
+3. Add this server:
+   - **URL:** `https://<origin>/mcp`  
+     Hosted: `https://identity-two-plum.vercel.app/mcp`  
+     Local: `http://localhost:3000/mcp`
+   - **Auth:** `Authorization: Bearer <token from login>`
+4. In Spark, send one message:
+
+```
+Save this conversation to my Solid pod.
+```
+
+Spark must call `spark_save_conversation` with `title` and `messages: [{role, content|text, timestamp?}]`. It returns `resourceUrl`, `webId`, optional `shareUrl`, and `confirmation` text to show you.
 
 MCP tools: `spark_save_conversation`, `spark_list_conversations`, `spark_get_conversation`, `spark_share_conversation`, `spark_unshare_conversation`.
 
+### Fallback: paste in `/app`
+
+If Spark is not connected, open `/app`, click **Save**, and paste a `**User:**` / `**Gemini:**` transcript or a public `g.co/gemini/share/…` link. Google does not publish a Gemini bulk export API.
+
 ```bash
-# after login
+# after login (same payload Spark sends)
 curl -s -X POST http://localhost:3000/conversations \
   -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-  -d '{"title":"Spark","messages":[{"role":"user","text":"hi"},{"role":"assistant","text":"hello"}]}'
+  -d '{"title":"Spark","messages":[{"role":"user","text":"hi","timestamp":"2026-09-01T10:00:00Z"},{"role":"assistant","text":"hello"}]}'
 ```
 
 ## Hosted deploy
@@ -111,8 +126,9 @@ The Solid server is a long-lived Go process with a volume. The marketing / passp
 1. Open https://identity-two-plum.vercel.app
 2. Claim a handle + password (or **Sign in**).
 3. You land on `/app`. Your WebID is shown on the account pane (`https://pod-production-ebe1.up.railway.app/{handle}/profile/card#me`).
-4. **Save** a Spark transcript, **Share**, open the link in a private window.
-5. Sign out, then sign back in with the same handle + password.
+4. Connect Gemini Spark to `https://identity-two-plum.vercel.app/mcp` with your Bearer token, then say **Save this conversation to my Solid pod.**
+5. Or use **Save** on `/app` as a paste fallback, then **Share**.
+6. Sign out, then sign back in with the same handle + password.
 
 **Environment**
 

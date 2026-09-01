@@ -266,10 +266,35 @@ assert_http "id logout" "204" "$code"
 # --- Spark conversations: save → list → share GET → unshare 404 ---
 code=$(curl_code /tmp/ft_body -X POST "$BASE/conversations" \
   -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-  --data '{"title":"Func Spark","messages":[{"role":"user","text":"hello spark"},{"role":"assistant","text":"saved"}]}')
+  --data '{"title":"Func Spark","messages":[{"role":"user","text":"hello spark","timestamp":"2026-09-01T20:15:30+10:00"},{"role":"assistant","text":"saved","timestamp":"2026-09-01T10:16:00Z"}]}')
 assert_http "conversation save" "201" "$code"
 assert_contains "conversation title" "Func Spark" "$(cat /tmp/ft_body)"
+assert_contains "conversation confirmation" "resourceUrl" "$(cat /tmp/ft_body)"
+assert_contains "conversation webId" "webId" "$(cat /tmp/ft_body)"
 CID=$(python3 -c 'import json; print(json.load(open("/tmp/ft_body"))["id"])')
+RESURL=$(python3 -c 'import json; print(json.load(open("/tmp/ft_body")).get("resourceUrl",""))')
+code=$(curl_code /tmp/ft_body -H "Authorization: Bearer $TOKEN" -H 'Accept: application/ld+json' "$RESURL")
+assert_http "conversation jsonld GET" "200" "$code"
+assert_contains "jsonld created" "dateCreated" "$(cat /tmp/ft_body)"
+body=$(cat /tmp/ft_body)
+if [[ "$body" == *2026-09-01T10:15:30Z* || "$body" == *2026-09-01T20:15:30+10:00* ]]; then
+  green "PASS  jsonld message time"; PASS=$((PASS+1))
+else
+  red "FAIL  jsonld message time"; FAIL=$((FAIL+1)); ERRORS+=("jsonld message time")
+fi
+TTLURL=${RESURL%.json}.ttl
+code=$(curl_code /tmp/ft_body -H "Authorization: Bearer $TOKEN" -H 'Accept: text/turtle' "$TTLURL")
+assert_http "conversation ttl GET" "200" "$code"
+ttlbody=$(cat /tmp/ft_body)
+if [[ "$ttlbody" == *dcterms:created* || "$ttlbody" == *purl.org/dc/terms/created* ]]; then
+  green "PASS  ttl dcterms created"; PASS=$((PASS+1))
+else
+  red "FAIL  ttl dcterms created"; FAIL=$((FAIL+1)); ERRORS+=("ttl dcterms created")
+fi
+code=$(curl_code /tmp/ft_body -X POST "$RESURL" \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' --data '{}')
+assert_http "POST to conversation document is 400" "400" "$code"
+assert_contains "POST document error" "Can only POST to containers" "$(cat /tmp/ft_body)"
 code=$(curl_code /tmp/ft_body "$BASE/conversations" -H "Authorization: Bearer $TOKEN")
 assert_http "conversation list" "200" "$code"
 assert_contains "conversation list title" "Func Spark" "$(cat /tmp/ft_body)"

@@ -122,8 +122,38 @@ assert_contains "login token" "eyJ" "$TOKEN"
 ME=$(tool_text openid_me "{\"token\":\"$TOKEN\"}")
 assert_contains "me handle" "$HANDLE" "$ME"
 
-SPARK=$(tool_text spark_save_conversation "{\"token\":\"$TOKEN\",\"title\":\"MCP Spark\",\"messages\":[{\"role\":\"user\",\"text\":\"from mcp\"},{\"role\":\"assistant\",\"text\":\"ok\"}]}")
+SPARK=$(tool_text spark_save_conversation "{\"token\":\"$TOKEN\",\"title\":\"MCP Spark\",\"messages\":[{\"role\":\"user\",\"content\":\"from mcp\",\"timestamp\":\"2026-09-01T20:15:30+10:00\"},{\"role\":\"assistant\",\"text\":\"ok\",\"timestamp\":\"2026-09-01T10:16:00Z\"}]}")
 assert_contains "spark save title" "MCP Spark" "$SPARK"
+assert_contains "spark save resourceUrl" "resourceUrl" "$SPARK"
+assert_contains "spark save webId" "webId" "$SPARK"
+assert_contains "spark save confirmation" "confirmation" "$SPARK"
+RESURL=$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("resourceUrl") or json.load(open("/dev/stdin")))' <<<"$SPARK" 2>/dev/null || python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("resourceUrl") or d.get("json",{}).get("resourceUrl",""))' <<<"$SPARK")
+if [[ -z "$RESURL" ]]; then
+  RESURL=$(python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("resourceUrl") or (d.get("json") or {}).get("resourceUrl") or (d.get("conversation") or {}).get("@id") or "")' <<<"$SPARK")
+fi
+assert_contains "spark resource path" "conversations/spark/" "$RESURL"
+code=$(curl -sS -o /tmp/spark_json.json -w '%{http_code}' -H "Authorization: Bearer $TOKEN" -H 'Accept: application/ld+json' "$RESURL")
+assert_eq "GET saved jsonld" "200" "$code"
+sjson=$(cat /tmp/spark_json.json)
+if [[ "$sjson" == *2026-09-01T10:15:30Z* || "$sjson" == *2026-09-01T20:15:30+10:00* ]]; then
+  green "PASS  jsonld message timestamp"; PASS=$((PASS+1))
+else
+  red "FAIL  jsonld message timestamp"; FAIL=$((FAIL+1)); ERRORS+=("jsonld message timestamp")
+fi
+assert_contains "jsonld source" "gemini-spark" "$(cat /tmp/spark_json.json)"
+TTLURL=${RESURL%.json}.ttl
+code=$(curl -sS -o /tmp/spark_ttl.ttl -w '%{http_code}' -H "Authorization: Bearer $TOKEN" -H 'Accept: text/turtle' "$TTLURL")
+assert_eq "GET saved turtle" "200" "$code"
+sttl=$(cat /tmp/spark_ttl.ttl)
+if [[ "$sttl" == *dcterms:created* || "$sttl" == *purl.org/dc/terms/created* ]]; then
+  green "PASS  ttl created"; PASS=$((PASS+1))
+else
+  red "FAIL  ttl created"; FAIL=$((FAIL+1)); ERRORS+=("ttl created")
+fi
+code=$(curl -sS -o /tmp/spark_post_doc.txt -w '%{http_code}' -X POST "$RESURL" \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{}')
+assert_eq "POST to json document 400" "400" "$code"
+assert_contains "container POST bug still on documents" "Can only POST to containers" "$(cat /tmp/spark_post_doc.txt)"
 SLIST=$(tool_text spark_list_conversations "{\"token\":\"$TOKEN\"}")
 assert_contains "spark list" "MCP Spark" "$SLIST"
 

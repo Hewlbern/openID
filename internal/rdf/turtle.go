@@ -37,6 +37,10 @@ func (g *Graph) AddLiteral(s, p, o string) {
 	g.Add(Triple{Subject: s, Predicate: p, Object: o, ObjectLit: true})
 }
 
+func (g *Graph) AddTypedLiteral(s, p, o, datatype string) {
+	g.Add(Triple{Subject: s, Predicate: p, Object: o, ObjectLit: true, Datatype: datatype})
+}
+
 func (g *Graph) Objects(s, p string) []string {
 	var out []string
 	for _, t := range g.Triples {

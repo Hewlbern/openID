@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"time"
 )
 
 var (
@@ -171,9 +172,13 @@ func normalizeMessages(in []Message) []Message {
 	for _, m := range in {
 		text := strings.TrimSpace(m.Text)
 		if text == "" {
+			text = strings.TrimSpace(m.Content)
+		}
+		if text == "" {
 			continue
 		}
-		out = append(out, Message{Role: normalizeRole(m.Role), Text: text})
+		msg := Message{Role: normalizeRole(m.Role), Text: text, Timestamp: m.Timestamp}
+		out = append(out, msg)
 	}
 	return out
 }
@@ -186,9 +191,42 @@ func messagesFromLoose(in []map[string]any) []Message {
 		if text == "" {
 			continue
 		}
-		out = append(out, Message{Role: normalizeRole(role), Text: strings.TrimSpace(text)})
+		msg := Message{Role: normalizeRole(role), Text: strings.TrimSpace(text)}
+		if ts := parseLooseTime(m["timestamp"]); ts != nil {
+			msg.Timestamp = ts
+		} else if ts := parseLooseTime(m["time"]); ts != nil {
+			msg.Timestamp = ts
+		} else if ts := parseLooseTime(m["created"]); ts != nil {
+			msg.Timestamp = ts
+		}
+		out = append(out, msg)
 	}
 	return out
+}
+
+func parseLooseTime(v any) *time.Time {
+	switch t := v.(type) {
+	case string:
+		s := strings.TrimSpace(t)
+		if s == "" {
+			return nil
+		}
+		for _, layout := range []string{time.RFC3339Nano, time.RFC3339, "2006-01-02T15:04:05Z07:00", "2006-01-02 15:04:05"} {
+			if parsed, err := time.Parse(layout, s); err == nil {
+				u := parsed.UTC()
+				return &u
+			}
+		}
+	case float64:
+		// unix seconds or milliseconds
+		sec := t
+		if sec > 1e12 {
+			sec = sec / 1000
+		}
+		u := time.Unix(int64(sec), 0).UTC()
+		return &u
+	}
+	return nil
 }
 
 func normalizeRole(role string) string {

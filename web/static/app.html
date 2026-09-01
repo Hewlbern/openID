@@ -42,7 +42,7 @@
   <div class="modal-bg" id="saveModal">
     <form class="modal wide" id="saveForm">
       <h3>Save a conversation</h3>
-      <p>Paste a Spark / Gemini transcript, or a public share link. Google does not publish a bulk export API — if the link is not publicly readable, paste the text instead.</p>
+      <p>Fallback only — in Gemini Spark say <strong>Save this conversation to my Solid pod</strong> and Spark will call <span class="mono">spark_save_conversation</span> on <span class="mono">/mcp</span>. Paste here if you are not connected.</p>
       <div class="field"><label>Title (optional)</label><input id="saveTitle" name="title" placeholder="Untitled conversation" /></div>
       <div class="field"><label>Gemini share URL (optional)</label><input id="saveURL" name="source_url" placeholder="https://g.co/gemini/share/…" /></div>
       <div class="field"><label>Transcript</label><textarea id="saveText" name="text" placeholder="**User:** …&#10;**Gemini:** …" rows="8"></textarea></div>

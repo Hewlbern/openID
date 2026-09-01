@@ -54,7 +54,7 @@ func (s *Server) dispatch(req *Request, bearer string) *Response {
 			ProtocolVersion: ver,
 			Capabilities:    map[string]any{"tools": map[string]any{}},
 			ServerInfo:      map[string]any{"name": ServerName, "version": ServerVersion},
-			Instructions:    "OpenID Solid identity. Humans: openid_login then spark_save_conversation. Gemini Spark: connect https://<origin>/mcp and pass a Bearer token from login. Agents: openid_register_agent, then pod read/write tools.",
+			Instructions:    "OpenID Solid identity. Gemini Spark: when the user asks to save/upload this conversation to their Solid pod or OpenID, call spark_save_conversation with the full current thread (title + messages[{role,content,timestamp?}]). Connect https://<origin>/mcp with Authorization: Bearer from /idp/login. Humans can also openid_login then spark_save_conversation. Agents: openid_register_agent, then pod read/write tools.",
 		})
 	case "notifications/initialized", "initialized", "notifications/cancelled":
 		return nil

@@ -267,9 +267,11 @@ func (s *Server) toolOpen() map[string]any {
 				"Call openid_audit_flush then openid_audit_verify for receipts",
 			},
 			"spark": map[string]any{
-				"mcp":   s.BaseURL + "/mcp",
-				"stdio": "go run ./cmd/mcp  (OPENID_BASE_URL=" + s.BaseURL + ")",
-				"auth":  "Bearer token from openid_login, or Authorization header on HTTP /mcp",
+				"mcp":    s.BaseURL + "/mcp",
+				"stdio":  "go run ./cmd/mcp  (OPENID_BASE_URL=" + s.BaseURL + ")",
+				"auth":   "Bearer token from openid_login, or Authorization header on HTTP /mcp",
+				"prompt": "Save this conversation to my Solid pod.",
+				"tool":   "spark_save_conversation",
 			},
 		},
 	}

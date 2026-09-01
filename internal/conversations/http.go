@@ -42,7 +42,7 @@ func (s *Service) handleRoot(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), status)
 			return
 		}
-		writeJSON(w, http.StatusCreated, c)
+		writeJSON(w, http.StatusCreated, s.ResultOf(c))
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}

@@ -1,6 +1,9 @@
 package conversations
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestParseMarkdownTranscript(t *testing.T) {
 	c, err := ParseTranscript(`# Weekend plans
@@ -47,6 +50,25 @@ func TestParseBarePaste(t *testing.T) {
 	}
 	if len(c.Messages) != 1 || c.Messages[0].Role != "user" {
 		t.Fatalf("%#v", c.Messages)
+	}
+}
+
+func TestParseJSONTimestamps(t *testing.T) {
+	c, err := ParseTranscript(`{
+		"title":"When",
+		"messages":[
+			{"role":"user","content":"hi","timestamp":"2026-09-01T20:15:30+10:00"},
+			{"role":"assistant","text":"yo","time":"2026-09-01T10:16:00Z"}
+		]
+	}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Messages[0].Timestamp == nil || c.Messages[0].Timestamp.UTC().Format("2006-01-02T15:04:05Z") != "2026-09-01T10:15:30Z" {
+		t.Fatalf("user ts %#v", c.Messages[0].Timestamp)
+	}
+	if c.Messages[1].Timestamp == nil || c.Messages[1].Timestamp.UTC().Format(time.RFC3339) != "2026-09-01T10:16:00Z" {
+		t.Fatalf("assistant ts %#v", c.Messages[1].Timestamp)
 	}
 }
 

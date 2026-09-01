@@ -642,6 +642,162 @@ func TestSparkSaveTimestampsAndRDF(t *testing.T) {
 	}
 }
 
+func mcpHTTPCall(t *testing.T, ts *httptest.Server, name string, args map[string]any, bearer string) (map[string]any, bool, string) {
+	t.Helper()
+	reqBody, _ := json.Marshal(map[string]any{
+		"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+		"params": map[string]any{"name": name, "arguments": args},
+	})
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/mcp", bytes.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	if bearer != "" {
+		req.Header.Set("Authorization", "Bearer "+bearer)
+	}
+	resp, err := ts.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	var rpc map[string]any
+	if err := json.Unmarshal(raw, &rpc); err != nil {
+		t.Fatalf("rpc %s", raw)
+	}
+	result, _ := rpc["result"].(map[string]any)
+	isErr, _ := result["isError"].(bool)
+	content, _ := result["content"].([]any)
+	text := ""
+	if len(content) > 0 {
+		item, _ := content[0].(map[string]any)
+		text, _ = item["text"].(string)
+	}
+	var parsed map[string]any
+	_ = json.Unmarshal([]byte(text), &parsed)
+	return parsed, isErr, text
+}
+
+func TestSparkConnectTokenMintSaveRevokeAndIsolation(t *testing.T) {
+	ts, _ := startOpenID(t)
+	reg := httptest.NewRequest(http.MethodPost, "/idp/register", strings.NewReader(
+		`{"handle":"alice","password":"testpass123","name":"Alice","createPod":true}`))
+	reg.Header.Set("Content-Type", "application/json")
+	regRec := httptest.NewRecorder()
+	ts.Config.Handler.ServeHTTP(regRec, reg)
+	if regRec.Code != 200 {
+		t.Fatalf("alice register %d %s", regRec.Code, regRec.Body.String())
+	}
+	var alice map[string]any
+	_ = json.Unmarshal(regRec.Body.Bytes(), &alice)
+	aliceTok, _ := alice["token"].(string)
+
+	mintReq, _ := http.NewRequest(http.MethodPost, ts.URL+"/idp/spark-token", strings.NewReader(`{}`))
+	mintReq.Header.Set("Authorization", "Bearer "+aliceTok)
+	mintReq.Header.Set("Content-Type", "application/json")
+	mintResp, err := ts.Client().Do(mintReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mintRaw, _ := io.ReadAll(mintResp.Body)
+	mintResp.Body.Close()
+	if mintResp.StatusCode != 200 {
+		t.Fatalf("mint %d %s", mintResp.StatusCode, mintRaw)
+	}
+	var minted map[string]any
+	_ = json.Unmarshal(mintRaw, &minted)
+	sparkTok, _ := minted["token"].(string)
+	if sparkTok == "" || minted["aud"] != "spark-mcp" || minted["scope"] != "spark" {
+		t.Fatalf("mint body %s", mintRaw)
+	}
+
+	saved, isErr, text := mcpHTTPCall(t, ts, "spark_save_conversation", map[string]any{
+		"title": "Connect token thread",
+		"messages": []any{
+			map[string]any{"role": "user", "content": "save via spark token", "timestamp": "2026-09-01T12:00:00Z"},
+			map[string]any{"role": "assistant", "text": "stored"},
+		},
+	}, sparkTok)
+	if isErr || sparkSaveID(saved) == "" {
+		t.Fatalf("spark save with connect token: err=%v %s %#v", isErr, text, saved)
+	}
+	if saved["webId"] == nil || saved["resourceUrl"] == nil {
+		t.Fatalf("save result %#v", saved)
+	}
+
+	deniedMint, _ := http.NewRequest(http.MethodPost, ts.URL+"/idp/spark-token", strings.NewReader(`{}`))
+	deniedMint.Header.Set("Authorization", "Bearer "+sparkTok)
+	deniedMint.Header.Set("Content-Type", "application/json")
+	deniedMintResp, err := ts.Client().Do(deniedMint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deniedMintResp.Body.Close()
+	if deniedMintResp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("active spark token must not mint another: %d", deniedMintResp.StatusCode)
+	}
+
+	_, isErr, text = mcpHTTPCall(t, ts, "openid_pod_put", map[string]any{
+		"path": "alice/inbox/nope.json", "body": "{}", "content_type": "application/json",
+	}, sparkTok)
+	if !isErr || !strings.Contains(text, "spark connect token cannot call") {
+		t.Fatalf("spark token must not call pod_put: %v %s", isErr, text)
+	}
+
+	regB := httptest.NewRequest(http.MethodPost, "/idp/register", strings.NewReader(
+		`{"handle":"bob","password":"testpass123","name":"Bob","createPod":true}`))
+	regB.Header.Set("Content-Type", "application/json")
+	bobRec := httptest.NewRecorder()
+	ts.Config.Handler.ServeHTTP(bobRec, regB)
+	if bobRec.Code != 200 {
+		t.Fatalf("bob register %d %s", bobRec.Code, bobRec.Body.String())
+	}
+
+	evil, _ := http.NewRequest(http.MethodPut, ts.URL+"/bob/conversations/spark/stolen.json", strings.NewReader(`{"no":true}`))
+	evil.Header.Set("Authorization", "Bearer "+sparkTok)
+	evil.Header.Set("Content-Type", "application/json")
+	evilResp, err := ts.Client().Do(evil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	evilBody, _ := io.ReadAll(evilResp.Body)
+	evilResp.Body.Close()
+	if evilResp.StatusCode != http.StatusForbidden {
+		t.Fatalf("alice spark token writing bob pod want 403, got %d %s", evilResp.StatusCode, evilBody)
+	}
+
+	revReq, _ := http.NewRequest(http.MethodDelete, ts.URL+"/idp/spark-token", nil)
+	revReq.Header.Set("Authorization", "Bearer "+aliceTok)
+	revResp, err := ts.Client().Do(revReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	revRaw, _ := io.ReadAll(revResp.Body)
+	revResp.Body.Close()
+	if revResp.StatusCode != 200 || !bytes.Contains(revRaw, []byte(`"revoked"`)) {
+		t.Fatalf("revoke %d %s", revResp.StatusCode, revRaw)
+	}
+
+	_, isErr, text = mcpHTTPCall(t, ts, "spark_save_conversation", map[string]any{
+		"title":    "after revoke",
+		"messages": []any{map[string]any{"role": "user", "text": "should fail"}},
+	}, sparkTok)
+	if !isErr || !strings.Contains(text, "revoked") {
+		t.Fatalf("after revoke want failure, got err=%v %s", isErr, text)
+	}
+
+	sparkMint, _ := http.NewRequest(http.MethodPost, ts.URL+"/idp/spark-token", strings.NewReader(`{}`))
+	sparkMint.Header.Set("Authorization", "Bearer "+sparkTok)
+	sparkMint.Header.Set("Content-Type", "application/json")
+	denied, err := ts.Client().Do(sparkMint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	denied.Body.Close()
+	if denied.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("revoked spark token minting another want 401, got %d", denied.StatusCode)
+	}
+}
+
 // TestSparkSaveLDPFallbackCatchesContainerPOSTBug stands up identity+LDP only
 // (no /conversations HTTP API). POST /conversations hits LDP and returns
 // "Can only POST to containers". spark_save_conversation must still persist

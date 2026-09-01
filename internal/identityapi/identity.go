@@ -36,6 +36,7 @@ type Service struct {
 	byID      map[string]*Account
 	clients   map[string]*ClientCredentials
 	sessions  map[string]string // cookie -> accountID
+	spark     map[string]*sparkGrant // jti -> grant
 	persistOK bool
 }
 
@@ -70,9 +71,11 @@ func New(store *resourcestore.Store, tokens *authn.TokenService, baseURL string)
 		byID:      map[string]*Account{},
 		clients:   map[string]*ClientCredentials{},
 		sessions:  map[string]string{},
+		spark:     map[string]*sparkGrant{},
 		persistOK: true,
 	}
 	s.load()
+	s.loadSparkGrants()
 	return s
 }
 
@@ -178,6 +181,12 @@ func (s *Service) handleIDP(w http.ResponseWriter, r *http.Request) {
 		s.me(w, r)
 	case path == "pods" && r.Method == http.MethodPost:
 		s.createPod(w, r)
+	case path == "spark-token" && r.Method == http.MethodGet:
+		s.handleSparkTokenGet(w, r)
+	case path == "spark-token" && r.Method == http.MethodPost:
+		s.handleSparkTokenMint(w, r)
+	case path == "spark-token" && r.Method == http.MethodDelete:
+		s.handleSparkTokenRevoke(w, r)
 	case path == "client-credentials" && r.Method == http.MethodPost:
 		s.createClientCredentials(w, r)
 	case path == "replica/adopt" && r.Method == http.MethodPost:
@@ -198,6 +207,7 @@ func (s *Service) handleIDP(w http.ResponseWriter, r *http.Request) {
 				"account":           s.BaseURL + "/idp/accounts/me",
 				"createPod":         s.BaseURL + "/idp/pods",
 				"clientCredentials": s.BaseURL + "/idp/client-credentials",
+				"sparkToken":        s.BaseURL + "/idp/spark-token",
 			},
 			"version": "solid-go/1.0",
 		})

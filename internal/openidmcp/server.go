@@ -5,12 +5,15 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+
+	"solid-go/internal/authn"
 )
 
 // Server is the OpenID MCP server (stdio + HTTP).
 type Server struct {
 	BaseURL string
 	HTTP    *http.Client
+	Tokens  *authn.TokenService
 }
 
 func New(baseURL string) *Server {

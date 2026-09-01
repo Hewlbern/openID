@@ -43,6 +43,10 @@ func (h *LDPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	agent := ""
 	if creds != nil {
 		agent = creds.WebID
+		if creds.IsSpark() && !authn.SparkPathAllowed(creds.WebID, path, r.Method) {
+			http.Error(w, "spark connect token is limited to your conversations container", http.StatusForbidden)
+			return
+		}
 	}
 
 	switch r.Method {

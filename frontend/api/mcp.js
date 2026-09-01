@@ -52,6 +52,24 @@ function cors(res) {
   res.setHeader("Access-Control-Expose-Headers", "Mcp-Session-Id");
 }
 
+function jwtPayload(token) {
+  try {
+    const parts = String(token || "").split(".");
+    if (parts.length < 2) return null;
+    const json = Buffer.from(parts[1].replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf8");
+    return JSON.parse(json);
+  } catch (e) {
+    return null;
+  }
+}
+
+function isSparkToken(token) {
+  const p = jwtPayload(token);
+  if (!p) return false;
+  const aud = Array.isArray(p.aud) ? p.aud : (p.aud ? [p.aud] : []);
+  return p.scope === "spark" || aud.includes("spark-mcp");
+}
+
 function bearer(req, args) {
   const fromArgs = args && typeof args.token === "string" ? args.token.trim() : "";
   if (fromArgs) return fromArgs;
@@ -327,6 +345,14 @@ module.exports = async function handler(req, res) {
     const name = body.params && body.params.name;
     const args = (body.params && body.params.arguments) || {};
     const token = bearer(req, args);
+    if (token && isSparkToken(token) && name && !String(name).startsWith("spark_")) {
+      res.status(200).json({
+        jsonrpc: "2.0",
+        id,
+        result: { isError: true, content: [{ type: "text", text: "spark connect token cannot call " + name }] },
+      });
+      return;
+    }
     try {
       const local = await callTool(name, args, token, req);
       if (local !== null) {

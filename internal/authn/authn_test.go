@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"fmt"
+	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
@@ -43,6 +44,39 @@ func TestAgentSignature(t *testing.T) {
 	creds, err := ts.Extract(req)
 	if err != nil || creds.WebID != webID || creds.Via != "agent_sig" {
 		t.Fatalf("%v %#v", err, creds)
+	}
+}
+
+func TestSparkConnectToken(t *testing.T) {
+	ts := NewTokenService("test-secret")
+	tok, jti, exp, err := ts.IssueSpark("https://ex/ada/profile/card#me", time.Hour)
+	if err != nil || tok == "" || jti == "" || exp.Before(time.Now()) {
+		t.Fatalf("%v %s %s %v", err, tok, jti, exp)
+	}
+	creds, err := ts.Parse(tok)
+	if err != nil || !creds.IsSpark() || creds.WebID != "https://ex/ada/profile/card#me" || creds.JTI != jti {
+		t.Fatalf("%v %#v", err, creds)
+	}
+	if HandleFromWebID(creds.WebID) != "ada" {
+		t.Fatalf("handle %s", HandleFromWebID(creds.WebID))
+	}
+	if !SparkPathAllowed(creds.WebID, "ada/conversations/spark/x.json", http.MethodPut) {
+		t.Fatal("owner conversations should be allowed")
+	}
+	if SparkPathAllowed(creds.WebID, "bob/conversations/spark/x.json", http.MethodPut) {
+		t.Fatal("other pod must be denied")
+	}
+	if SparkPathAllowed(creds.WebID, "ada/inbox/note.json", http.MethodPut) {
+		t.Fatal("inbox must be denied")
+	}
+	ts.RevokeJTI(jti)
+	if _, err := ts.Parse(tok); err != ErrRevoked {
+		t.Fatalf("revoked want ErrRevoked got %v", err)
+	}
+	session, _ := ts.Issue("https://ex/ada/profile/card#me", "", time.Hour)
+	sess, err := ts.Parse(session)
+	if err != nil || sess.IsSpark() {
+		t.Fatalf("session token should not be spark: %v %#v", err, sess)
 	}
 }
 

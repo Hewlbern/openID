@@ -285,3 +285,43 @@ html, body { height: 100%; }
 }
 .share-page .chips { justify-content: flex-start; }
 .toolbar .btn { padding: 7px 14px; }
+
+.spark-connect {
+  margin: 28px 0 16px;
+  padding: 18px 18px 16px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: #f7f7f8;
+}
+.spark-connect h2 {
+  margin: 0 0 8px;
+  font-size: 16px;
+  font-weight: 650;
+  letter-spacing: -0.03em;
+}
+.spark-connect p { margin: 0 0 12px; line-height: 1.5; }
+.spark-connect label {
+  display: block;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 10px 0 6px;
+}
+.spark-connect .row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 12px;
+}
+.spark-connect .token-box {
+  margin: 0 0 8px;
+  padding: 10px 12px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  word-break: break-all;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.hint.ok { color: var(--ok, #1b7a4a); }

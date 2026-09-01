@@ -82,19 +82,22 @@ The happy path is **inside Gemini Spark**. Spark is a custom MCP client of this 
 
 Writes land at `{pod}/{handle}/conversations/spark/{id}.json` (JSON-LD transcript) plus `{id}.ttl` (Conversation / Message RDF with `dcterms:created`, `dcterms:modified`, `schema:dateCreated`, per-message timestamps, `foaf`/`schema` roles, owner WebID, `source=gemini-spark`). Containers `conversations/` and `conversations/spark/` are created first (paths end with `/`). Every write is an audited LDP PUT (IPFS / OpenTimestamps).
 
-### Connect Spark (do this once)
+### Spark connect token
 
-1. Register or log in at `https://<origin>/` (hosted: https://identity-two-plum.vercel.app ) and copy the Bearer token from `/idp/login` (or the token shown after you sign in).
-2. In Gemini Spark open **Settings → Custom Connected Apps / MCP**.
-3. Add this server:
-   - **URL:** `https://<origin>/mcp`  
-     Hosted: `https://identity-two-plum.vercel.app/mcp`  
-     Local: `http://localhost:3000/mcp`
-   - **Auth:** `Authorization: Bearer <token from login>`
-4. In Spark, send one message:
+Do **not** paste the forever login Bearer into Spark. On `/app` (while signed in) use the **Spark connect** panel:
+
+1. Open `https://<origin>/app` (hosted: https://identity-two-plum.vercel.app/app ).
+2. Click **Create / copy connect token**. Copy **MCP URL** (`https://<origin>/mcp`) and the token.
+3. Gemini Spark → **Settings → Custom Connected Apps / MCP** → paste URL + `Authorization: Bearer <connect token>`.
+4. In a chat say: `Save this conversation to my Solid pod.`
+5. **Revoke** invalidates every current Spark connect token for your WebID.
+
+The connect token is a distinct JWT (`aud: spark-mcp`, `scope: spark`, unique `jti`). Default lifetime is **30 days** (`SOLID_SPARK_TOKEN_TTL`, e.g. `720h`). It can only call Spark MCP tools (save / list / get / share / unshare) and read/write **your** `{handle}/conversations/` container. It cannot mint more tokens, write another pod, or call general pod tools.
 
 ```
-Save this conversation to my Solid pod.
+POST /idp/spark-token     # session required → { token, expires, jti, mcpUrl, webId }
+GET  /idp/spark-token     # list active grants (no secret)
+DELETE /idp/spark-token   # revoke all, or ?jti=
 ```
 
 Spark must call `spark_save_conversation` with `title` and `messages: [{role, content|text, timestamp?}]`. It returns `resourceUrl`, `webId`, optional `shareUrl`, and `confirmation` text to show you.
@@ -126,7 +129,7 @@ The Solid server is a long-lived Go process with a volume. The marketing / passp
 1. Open https://identity-two-plum.vercel.app
 2. Claim a handle + password (or **Sign in**).
 3. You land on `/app`. Your WebID is shown on the account pane (`https://pod-production-ebe1.up.railway.app/{handle}/profile/card#me`).
-4. Connect Gemini Spark to `https://identity-two-plum.vercel.app/mcp` with your Bearer token, then say **Save this conversation to my Solid pod.**
+4. On `/app`, **Create / copy connect token**, add `https://identity-two-plum.vercel.app/mcp` in Spark, then say **Save this conversation to my Solid pod.**
 5. Or use **Save** on `/app` as a paste fallback, then **Share**.
 6. Sign out, then sign back in with the same handle + password.
 

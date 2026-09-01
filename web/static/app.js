@@ -98,6 +98,10 @@ function renderList() {
   });
 }
 
+function mcpURL() {
+  return location.origin + "/mcp";
+}
+
 function showAccount() {
   if (!account) return;
   $("detail").innerHTML = `
@@ -109,7 +113,114 @@ function showAccount() {
     </div>
     <p class="mono">${escapeHtml(account.webId || "")}</p>
     <p><a href="${escapeHtml(account.publicUrl || "/i/" + account.handle)}">Public page →</a></p>
-    <p class="hint">In Gemini Spark: Settings → Custom Connected Apps / MCP → URL <span class="mono">${escapeHtml(location.origin)}/mcp</span> with the Bearer token from this login. Then say <strong>Save this conversation to my Solid pod.</strong> The Save button here is a paste fallback.</p>`;
+    <section class="spark-connect" id="sparkConnect">
+      <h2>Spark connect</h2>
+      <p>Gemini Spark → Settings → Custom Connected Apps / MCP → paste the MCP URL and this Bearer token. Then in a chat say <strong>Save this conversation to my Solid pod.</strong></p>
+      <label>MCP URL</label>
+      <p class="token-box mono" id="sparkMcpUrl">${escapeHtml(mcpURL())}</p>
+      <div class="row">
+        <button type="button" class="btn" id="sparkMintBtn">Create / copy connect token</button>
+        <button type="button" class="btn ghost" id="sparkCopyUrlBtn">Copy MCP URL</button>
+        <button type="button" class="btn ghost" id="sparkCopyTokBtn">Copy token</button>
+        <button type="button" class="btn ghost" id="sparkRevokeBtn">Revoke</button>
+      </div>
+      <label>Connect token</label>
+      <p class="token-box mono" id="sparkTokenBox">No token yet. Create one — it lasts 30 days, is scoped to your WebID, and only works for Spark save/list/share.</p>
+      <p class="hint" id="sparkConnectHint"></p>
+    </section>
+    <p class="hint">The Save button is a paste fallback if Spark is not connected.</p>`;
+  bindSparkConnect();
+}
+
+let sparkConnectToken = "";
+try { sparkConnectToken = sessionStorage.getItem("openid.sparkToken") || ""; } catch (e) {}
+
+async function copyText(value) {
+  const t = String(value || "");
+  if (!t) return false;
+  try {
+    await navigator.clipboard.writeText(t);
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+function setSparkHint(text, ok) {
+  const el = $("sparkConnectHint");
+  if (!el) return;
+  el.textContent = text;
+  el.className = "hint" + (ok === false ? " bad" : ok ? " ok" : "");
+}
+
+function renderSparkTokenBox(info) {
+  const box = $("sparkTokenBox");
+  if (!box) return;
+  if (sparkConnectToken) {
+    box.textContent = sparkConnectToken;
+    return;
+  }
+  if (info && info.tokens && info.tokens.length) {
+    const t = info.tokens[0];
+    box.textContent = "A connect token is active until " + (t.expires || "expiry") + ". The secret is only shown when you create it — create again or copy if you still have it.";
+    return;
+  }
+  box.textContent = "No token yet. Create one — it lasts 30 days, is scoped to your WebID, and only works for Spark save/list/share.";
+}
+
+async function loadSparkTokenStatus() {
+  const res = await openidFetch("/idp/spark-token");
+  if (!res.ok) return;
+  const info = await res.json();
+  renderSparkTokenBox(info);
+  if (info.ttl) {
+    const hint = $("sparkConnectHint");
+    if (hint && !hint.textContent) hint.textContent = "Lifetime " + info.ttl + " (SOLID_SPARK_TOKEN_TTL).";
+  }
+}
+
+function bindSparkConnect() {
+  const mint = $("sparkMintBtn");
+  const copyUrl = $("sparkCopyUrlBtn");
+  const copyTok = $("sparkCopyTokBtn");
+  const revoke = $("sparkRevokeBtn");
+  if (copyUrl) copyUrl.addEventListener("click", async () => {
+    setSparkHint(await copyText(mcpURL()) ? "Copied MCP URL." : mcpURL(), true);
+  });
+  if (copyTok) copyTok.addEventListener("click", async () => {
+    if (!sparkConnectToken) {
+      setSparkHint("Create a token first — the secret is only shown once.", false);
+      return;
+    }
+    setSparkHint(await copyText(sparkConnectToken) ? "Copied connect token." : "Copy failed.", true);
+  });
+  if (mint) mint.addEventListener("click", async () => {
+    setSparkHint("Minting…");
+    const res = await openidFetch("/idp/spark-token", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+    if (!res.ok) {
+      setSparkHint(await res.text(), false);
+      return;
+    }
+    const doc = await res.json();
+    sparkConnectToken = doc.token || "";
+    try { sessionStorage.setItem("openid.sparkToken", sparkConnectToken); } catch (e) {}
+    renderSparkTokenBox();
+    const copied = await copyText(sparkConnectToken);
+    setSparkHint((copied ? "Created and copied. " : "Created. ") + "Expires " + (doc.expires || "") + ". Paste as Bearer in Spark.", true);
+  });
+  if (revoke) revoke.addEventListener("click", async () => {
+    const res = await openidFetch("/idp/spark-token", { method: "DELETE" });
+    if (!res.ok) {
+      setSparkHint(await res.text(), false);
+      return;
+    }
+    sparkConnectToken = "";
+    try { sessionStorage.removeItem("openid.sparkToken"); } catch (e) {}
+    renderSparkTokenBox({ tokens: [] });
+    setSparkHint("Revoked. Spark can no longer save with the old token.", true);
+  });
+  renderSparkTokenBox();
+  loadSparkTokenStatus();
 }
 
 function showSpark(c) {

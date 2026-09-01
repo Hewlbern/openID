@@ -3,12 +3,15 @@ package openidmcp
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
+
+	"solid-go/internal/authn"
 )
 
 // Tool is an MCP tool descriptor.
@@ -16,6 +19,23 @@ type Tool struct {
 	Name        string         `json:"name"`
 	Description string         `json:"description"`
 	InputSchema map[string]any `json:"inputSchema"`
+}
+
+func (s *Server) denySparkLocked(name, token string) error {
+	if s.Tokens == nil || strings.TrimSpace(token) == "" {
+		return nil
+	}
+	creds, err := s.Tokens.Parse(token)
+	if err != nil {
+		if errors.Is(err, authn.ErrRevoked) {
+			return fmt.Errorf("spark connect token revoked")
+		}
+		return nil
+	}
+	if creds.IsSpark() && !strings.HasPrefix(name, "spark_") {
+		return fmt.Errorf("spark connect token cannot call %s", name)
+	}
+	return nil
 }
 
 func objectSchema(props map[string]any, required ...string) map[string]any {
@@ -88,6 +108,17 @@ type httpResult struct {
 }
 
 func (s *Server) callTool(name string, args json.RawMessage, bearer string) *CallResult {
+	tokenHint := bearer
+	if tokenHint == "" && len(args) > 0 {
+		var peek struct {
+			Token string `json:"token"`
+		}
+		_ = json.Unmarshal(args, &peek)
+		tokenHint = peek.Token
+	}
+	if err := s.denySparkLocked(name, tokenHint); err != nil {
+		return textResult(nil, err)
+	}
 	if strings.HasPrefix(name, "spark_") {
 		return s.callSpark(name, args, bearer)
 	}

@@ -344,6 +344,32 @@ code=$(curl_code /tmp/ft_body -D /tmp/ft_hdr -X OPTIONS "$BASE/agents" \
 assert_http "CORS preflight" "204" "$code"
 assert_contains "CORS allow origin" "Access-Control-Allow-Origin" "$(cat /tmp/ft_hdr)"
 
+# --- Spark connect token: mint → save → revoke ---
+SPARKMINT=$(curl -sS -X POST "$BASE/idp/spark-token" \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{}')
+echo "$SPARKMINT" > /tmp/ft_spark_mint.json
+SPARKTOK=$(python3 -c 'import json; print(json.load(open("/tmp/ft_spark_mint.json")).get("token",""))')
+assert_contains "spark connect token jwt" "eyJ" "$SPARKTOK"
+assert_contains "spark connect aud" "spark-mcp" "$SPARKMINT"
+code=$(curl_code /tmp/ft_body -X POST "$BASE/conversations" \
+  -H "Authorization: Bearer $SPARKTOK" -H 'Content-Type: application/json' \
+  --data '{"title":"Spark token","messages":[{"role":"user","text":"via connect token"}]}')
+assert_http "spark token conversation save" "201" "$code"
+code=$(curl_code /tmp/ft_body -X PUT "$BASE/workspace/from-spark.txt" \
+  -H "Authorization: Bearer $SPARKTOK" -H 'Content-Type: text/plain' --data 'nope')
+assert_http "spark token cannot write workspace" "403" "$code"
+code=$(curl_code /tmp/ft_body -X DELETE "$BASE/idp/spark-token" -H "Authorization: Bearer $TOKEN")
+assert_http "spark token revoke" "200" "$code"
+code=$(curl_code /tmp/ft_body -X POST "$BASE/conversations" \
+  -H "Authorization: Bearer $SPARKTOK" -H 'Content-Type: application/json' \
+  --data '{"title":"after revoke","messages":[{"role":"user","text":"no"}]}')
+if [[ "$code" == "401" || "$code" == "400" ]]; then
+  green "PASS  revoked spark token rejected ($code)"; PASS=$((PASS+1))
+else
+  red "FAIL  revoked spark token (expected 401/400 actual=$code)"
+  FAIL=$((FAIL+1)); ERRORS+=("revoked spark token: $code")
+fi
+
 # SSE notification on create
 set +e
 python3 - <<PY

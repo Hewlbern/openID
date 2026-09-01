@@ -13,7 +13,7 @@ import (
 const sparkSaveDescription = `FIRST-CLASS tool for Gemini Spark. When the user asks to save, upload, store, or write this chat / thread / conversation to their Solid pod or OpenID, you MUST call this tool immediately with the full current conversation. Do not tell them to leave Spark or paste into /app — that UI is a fallback only. Pass title and the complete messages array as [{role, content|text, timestamp?}]. Include timezone-aware ISO-8601 timestamps on each message when Spark has them. Spark itself supplies the transcript; do not scrape Gemini. The server writes conversations/spark/{id}.json (JSON-LD) plus a Turtle sidecar (schema:Conversation / schema:Message, dcterms:created, dcterms:modified, schema:dateCreated, foaf/schema agent roles, owner WebID, source=gemini-spark) using audited LDP PUTs after ensuring the conversations/ and conversations/spark/ containers exist (paths end with /). Returns resourceUrl, webId, optional shareUrl, created/modified, and confirmation text to show the user.`
 
 func sparkTools() []Tool {
-	token := strProp("Bearer token from openid_login or openid_register (or send Authorization: Bearer on HTTP /mcp)")
+	token := strProp("Spark connect token from /app (POST /idp/spark-token). Prefer this over the forever login Bearer. Or send Authorization: Bearer on HTTP /mcp.")
 	id := strProp("Conversation id returned by spark_save_conversation")
 	return []Tool{
 		{Name: "spark_save_conversation", Description: sparkSaveDescription, InputSchema: objectSchema(map[string]any{

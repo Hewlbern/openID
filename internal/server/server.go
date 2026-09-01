@@ -172,6 +172,7 @@ func NewServer(opts *ServerOptions) *Server {
 		})
 	})
 	mcp := openidmcp.New(opts.BaseURL)
+	mcp.Tokens = tokens
 	root.Handle("/mcp", mcp.Handler())
 	root.Handle("/mcp/", mcp.Handler())
 	idp.Routes(root)

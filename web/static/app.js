@@ -314,10 +314,9 @@ function renderSparkTokenBox(info) {
 }
 
 async function sparkTokenFetch(path, opts) {
-  return fetch("/api/spark-token" + (path || ""), Object.assign({
-    headers: openidHeaders(opts && opts.headers),
-    credentials: "include",
-  }, opts || {}));
+  // Delegate to openidFetch so caller headers (e.g. Content-Type) cannot
+  // overwrite the session Authorization that openidHeaders() attaches.
+  return openidFetch("/api/spark-token" + (path || ""), opts);
 }
 
 async function loadSparkTokenStatus() {

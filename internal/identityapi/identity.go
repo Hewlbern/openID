@@ -107,6 +107,18 @@ func (s *Service) FindByHandle(handle string) *Account {
 	return s.byHandle[strings.ToLower(handle)]
 }
 
+// AccountFromRequest resolves a session cookie or Bearer token to an account.
+func (s *Service) AccountFromRequest(r *http.Request) *Account {
+	return s.accountFromRequest(r)
+}
+
+// FindByWebID returns the account bound to a WebID, if any.
+func (s *Service) FindByWebID(webID string) *Account {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.accountByWebID(webID)
+}
+
 func (s *Service) PublicAccount(handle string) map[string]interface{} {
 	acc := s.FindByHandle(handle)
 	if acc == nil {
@@ -206,6 +218,7 @@ var reservedHandles = map[string]bool{
 	"oauth": true, "health": true, "app": true, "i": true, "static": true,
 	"api": true, "admin": true, "www": true, "well-known": true,
 	"welcome": true, "dashboard": true, "login": true, "mcp": true, "records": true,
+	"share": true, "conversations": true,
 }
 
 func (s *Service) handleAvailability(w http.ResponseWriter, handle string) {
@@ -284,7 +297,7 @@ func (s *Service) register(w http.ResponseWriter, r *http.Request) {
 	token, _ := s.Tokens.Issue(acc.WebID, "", passwordSessionTTL)
 	sid := uuid.NewString()
 	s.sessions[sid] = acc.ID
-	http.SetCookie(w, &http.Cookie{Name: "solid-session", Value: sid, Path: "/", HttpOnly: true, MaxAge: int(passwordSessionTTL.Seconds())})
+	http.SetCookie(w, sessionCookie(r, sid, int(passwordSessionTTL.Seconds())))
 	s.saveLocalAuth(acc.Handle, req.Password)
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
@@ -293,6 +306,41 @@ func (s *Service) register(w http.ResponseWriter, r *http.Request) {
 		"webId":   acc.WebID,
 		"pod":     s.BaseURL + "/" + acc.PodPath,
 	})
+}
+
+// sessionCookie is usable from the Vercel site (same-origin proxy) or a
+// cross-site OPENID_API origin. Bearer tokens in localStorage remain the
+// primary /app auth; the cookie is a same-site fallback.
+func sessionCookie(r *http.Request, value string, maxAge int) *http.Cookie {
+	c := &http.Cookie{
+		Name:     "solid-session",
+		Value:    value,
+		Path:     "/",
+		HttpOnly: true,
+		MaxAge:   maxAge,
+		SameSite: http.SameSiteLaxMode,
+	}
+	https := r != nil && (r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https"))
+	origin := ""
+	if r != nil {
+		origin = r.Header.Get("Origin")
+	}
+	crossSite := origin != "" && r.Host != "" && !strings.Contains(strings.TrimPrefix(strings.TrimPrefix(origin, "https://"), "http://"), r.Host)
+	if https {
+		c.Secure = true
+	}
+	if crossSite && https {
+		// Cross-origin Vercel → Railway without a proxy. Lax cookies are
+		// not sent on fetch(); Bearer is required. None lets the cookie
+		// ride if the browser allows it.
+		c.SameSite = http.SameSiteNoneMode
+		c.Secure = true
+	}
+	if maxAge < 0 {
+		c.MaxAge = -1
+		c.Value = ""
+	}
+	return c
 }
 
 func (s *Service) provisionPod(ctx context.Context, acc *Account, name string) error {
@@ -392,7 +440,7 @@ func (s *Service) login(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	s.sessions[sid] = acc.ID
 	s.mu.Unlock()
-	http.SetCookie(w, &http.Cookie{Name: "solid-session", Value: sid, Path: "/", HttpOnly: true, MaxAge: int(passwordSessionTTL.Seconds())})
+	http.SetCookie(w, sessionCookie(r, sid, int(passwordSessionTTL.Seconds())))
 	s.saveLocalAuth(acc.Handle, req.Password)
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{"token": token, "webId": acc.WebID, "account": acc})
@@ -404,7 +452,7 @@ func (s *Service) logout(w http.ResponseWriter, r *http.Request) {
 		delete(s.sessions, c.Value)
 		s.mu.Unlock()
 	}
-	http.SetCookie(w, &http.Cookie{Name: "solid-session", Value: "", Path: "/", MaxAge: -1})
+	http.SetCookie(w, sessionCookie(r, "", -1))
 	w.WriteHeader(http.StatusNoContent)
 }
 

@@ -258,3 +258,30 @@ html, body { height: 100%; }
   .split { grid-template-columns: 1fr; }
   .convos { border-right: 0; border-bottom: 1px solid var(--line); max-height: 40vh; }
 }
+
+.modal.wide { width: min(560px, 100%); }
+.hint.bad { color: var(--bad); }
+.actions { display: flex; gap: 10px; flex-wrap: wrap; margin: 18px 0 8px; }
+.turn { margin: 0 0 14px; }
+.turn .who {
+  display: block;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 0 0 6px;
+}
+.turn.assistant .bubble { background: #eef3f8; }
+.turn.user .bubble { background: #f2f2f3; }
+.share-page {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 12px 20px 64px;
+}
+.share-page h1 {
+  margin: 8px 0 12px;
+  font-size: 28px;
+  letter-spacing: -0.04em;
+}
+.share-page .chips { justify-content: flex-start; }
+.toolbar .btn { padding: 7px 14px; }

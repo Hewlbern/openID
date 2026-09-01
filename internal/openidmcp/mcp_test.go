@@ -164,6 +164,7 @@ func TestProtocolInitializeListPing(t *testing.T) {
 		"openid_open", "openid_status", "openid_discover", "openid_register",
 		"openid_login", "openid_register_agent", "openid_pod_put", "openid_pod_get",
 		"openid_client_credentials", "openid_token", "openid_audit_flush", "openid_audit_verify",
+		"spark_save_conversation", "spark_list_conversations", "spark_share_conversation",
 	} {
 		if !names[want] {
 			t.Fatalf("missing tool %s", want)
@@ -449,4 +450,68 @@ func TestMountedMCPOnSolidServer(t *testing.T) {
 	if html.StatusCode != 200 || !bytes.Contains(hbody, []byte("Solid server")) {
 		t.Fatalf("dashboard: %d %s", html.StatusCode, hbody[:min(200, len(hbody))])
 	}
+}
+
+func TestSparkConversationTools(t *testing.T) {
+	ts, mcp := startOpenID(t)
+	reg := callTool(t, mcp, "openid_register", map[string]any{
+		"handle": "spark", "password": "testpass123", "name": "Spark User",
+	})
+	token := reg["json"].(map[string]any)["token"].(string)
+	saved := callTool(t, mcp, "spark_save_conversation", map[string]any{
+		"token": token,
+		"title": "From Spark",
+		"messages": []any{
+			map[string]any{"role": "user", "text": "hello from spark"},
+			map[string]any{"role": "assistant", "text": "saved in your pod"},
+		},
+	})
+	inner := saved["json"].(map[string]any)
+	id, _ := inner["id"].(string)
+	if id == "" {
+		t.Fatalf("save: %#v", saved)
+	}
+	listed := callTool(t, mcp, "spark_list_conversations", map[string]any{"token": token})
+	listDump, _ := json.Marshal(listed)
+	if !strings.Contains(string(listDump), "From Spark") {
+		t.Fatalf("list: %#v", listed)
+	}
+	got := callTool(t, mcp, "spark_get_conversation", map[string]any{"id": id, "token": token})
+	if !strings.Contains(fmtJSON(got), "hello from spark") {
+		t.Fatalf("get: %#v", got)
+	}
+	shared := callTool(t, mcp, "spark_share_conversation", map[string]any{"id": id, "token": token})
+	shareObj := shared["json"].(map[string]any)
+	share := shareObj["share"].(map[string]any)
+	url, _ := share["url"].(string)
+	if url == "" {
+		t.Fatalf("share url: %#v", shared)
+	}
+	pub, err := http.Get(strings.Replace(url, ts.URL, ts.URL, 1))
+	if err != nil {
+		// share URL uses BaseURL from the solid server (ts.URL)
+		pub, err = http.Get(url)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	pbody, _ := io.ReadAll(pub.Body)
+	pub.Body.Close()
+	if pub.StatusCode != 200 || !bytes.Contains(pbody, []byte("hello from spark")) {
+		t.Fatalf("public share %d %s", pub.StatusCode, pbody)
+	}
+	_ = callTool(t, mcp, "spark_unshare_conversation", map[string]any{"id": id, "token": token})
+	gone, err := http.Get(url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gone.Body.Close()
+	if gone.StatusCode != 404 && gone.StatusCode != 401 {
+		t.Fatalf("unshare status %d", gone.StatusCode)
+	}
+}
+
+func fmtJSON(v any) string {
+	b, _ := json.Marshal(v)
+	return string(b)
 }

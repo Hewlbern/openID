@@ -40,7 +40,7 @@ async function checkHandle(value, statusEl, btn) {
     statusEl.textContent = "";
     return;
   }
-  const res = await fetch(openidURL("/idp/handles/" + encodeURIComponent(handle)));
+  const res = await openidFetch("/idp/handles/" + encodeURIComponent(handle));
   const data = await res.json();
   if (data.available) {
     availableHandle = data.handle;
@@ -94,7 +94,7 @@ registerForm.addEventListener("submit", async (e) => {
     email: field(registerForm, "email").value,
     createPod: true,
   };
-  const res = await fetch(openidURL("/idp/register"), {
+  const res = await openidFetch("/idp/register", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -116,7 +116,7 @@ loginForm.addEventListener("submit", async (e) => {
   const payload = handle.includes("@")
     ? { email: handle, password }
     : { handle, password };
-  const res = await fetch(openidURL("/idp/login"), {
+  const res = await openidFetch("/idp/login", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -135,12 +135,12 @@ loginForm.addEventListener("submit", async (e) => {
 
 const apiStatus = document.getElementById("apiStatus");
 if (apiStatus) {
-  fetch(openidURL("/health")).then((r) => {
+  openidFetch("/health").then((r) => {
     apiStatus.textContent = r.ok ? (apiHost.includes("railway") ? "Railway" : "Pod") : "No pod";
   }).catch(() => { apiStatus.textContent = "No pod"; });
 }
 
 if (localStorage.getItem("openid.token")) {
-  fetch(openidURL("/idp/accounts/me"), { headers: { Authorization: "Bearer " + localStorage.getItem("openid.token") } })
+  openidFetch("/idp/accounts/me")
     .then((r) => { if (r.ok) location.replace("/app"); });
 }

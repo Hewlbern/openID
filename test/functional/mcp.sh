@@ -91,7 +91,8 @@ assert_eq "initialized notification" "202" "$NOTE"
 
 LIST=$(rpc '{"jsonrpc":"2.0","id":2,"method":"tools/list"}')
 for tool in openid_open openid_status openid_discover openid_register openid_login \
-  openid_register_agent openid_pod_put openid_pod_get openid_audit_flush; do
+  openid_register_agent openid_pod_put openid_pod_get openid_audit_flush \
+  spark_save_conversation spark_list_conversations spark_share_conversation; do
   assert_contains "tools/list $tool" "$tool" "$LIST"
 done
 
@@ -120,6 +121,11 @@ assert_contains "login token" "eyJ" "$TOKEN"
 
 ME=$(tool_text openid_me "{\"token\":\"$TOKEN\"}")
 assert_contains "me handle" "$HANDLE" "$ME"
+
+SPARK=$(tool_text spark_save_conversation "{\"token\":\"$TOKEN\",\"title\":\"MCP Spark\",\"messages\":[{\"role\":\"user\",\"text\":\"from mcp\"},{\"role\":\"assistant\",\"text\":\"ok\"}]}")
+assert_contains "spark save title" "MCP Spark" "$SPARK"
+SLIST=$(tool_text spark_list_conversations "{\"token\":\"$TOKEN\"}")
+assert_contains "spark list" "MCP Spark" "$SLIST"
 
 PUT=$(tool_text openid_pod_put "{\"path\":\"$HANDLE/public/grokbot.json\",\"body\":\"{\\\"hello\\\":\\\"grokbot\\\"}\",\"content_type\":\"application/json\",\"token\":\"$TOKEN\"}")
 assert_contains "pod put created" '"status": 201' "$PUT"

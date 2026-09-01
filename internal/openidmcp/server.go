@@ -21,6 +21,10 @@ func New(baseURL string) *Server {
 }
 
 func (s *Server) Handle(raw []byte) *Response {
+	return s.HandleWithAuth(raw, "")
+}
+
+func (s *Server) HandleWithAuth(raw []byte, bearer string) *Response {
 	if len(bytesTrimSpace(raw)) == 0 {
 		return fail(nil, ErrParse, "empty request", nil)
 	}
@@ -34,10 +38,10 @@ func (s *Server) Handle(raw []byte) *Response {
 	if req.Method == "" {
 		return fail(req.ID, ErrInvalidReq, "method required", nil)
 	}
-	return s.dispatch(&req)
+	return s.dispatch(&req, bearer)
 }
 
-func (s *Server) dispatch(req *Request) *Response {
+func (s *Server) dispatch(req *Request, bearer string) *Response {
 	switch req.Method {
 	case "initialize":
 		var p initializeParams
@@ -50,7 +54,7 @@ func (s *Server) dispatch(req *Request) *Response {
 			ProtocolVersion: ver,
 			Capabilities:    map[string]any{"tools": map[string]any{}},
 			ServerInfo:      map[string]any{"name": ServerName, "version": ServerVersion},
-			Instructions:    "OpenID Solid identity for AI agents. Start with openid_open, then openid_register_agent or openid_login, then pod read/write tools.",
+			Instructions:    "OpenID Solid identity. Humans: openid_login then spark_save_conversation. Gemini Spark: connect https://<origin>/mcp and pass a Bearer token from login. Agents: openid_register_agent, then pod read/write tools.",
 		})
 	case "notifications/initialized", "initialized", "notifications/cancelled":
 		return nil
@@ -63,7 +67,7 @@ func (s *Server) dispatch(req *Request) *Response {
 		if err := json.Unmarshal(req.Params, &p); err != nil || p.Name == "" {
 			return fail(req.ID, ErrBadParams, "tools/call requires name", nil)
 		}
-		return ok(req.ID, s.callTool(p.Name, p.Arguments))
+		return ok(req.ID, s.callTool(p.Name, p.Arguments, bearer))
 	default:
 		if strings.HasPrefix(req.Method, "notifications/") {
 			return nil

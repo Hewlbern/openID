@@ -244,6 +244,55 @@ code=$(curl_code /tmp/ft_body "$BASE/idp/accounts/me" -H "Authorization: Bearer 
 assert_http "accounts/me bearer" "200" "$code"
 assert_contains "accounts/me email" "func@example.com" "$(cat /tmp/ft_body)"
 
+# --- Identity session: register → login → me → logout ---
+IDHANDLE="id$(date +%s)"
+IDREG=$(curl -sS -c /tmp/ft_id_cookies -X POST "$BASE/idp/register" \
+  -H 'Content-Type: application/json' \
+  -d "{\"handle\":\"$IDHANDLE\",\"password\":\"testpass123\",\"name\":\"ID User\",\"createPod\":true}")
+echo "$IDREG" > /tmp/ft_idreg.json
+IDTOKEN=$(python3 -c 'import json; print(json.load(open("/tmp/ft_idreg.json"))["token"])')
+assert_contains "id register token" "eyJ" "$IDTOKEN"
+IDLOGIN=$(curl -sS -c /tmp/ft_id_cookies -X POST "$BASE/idp/login" \
+  -H 'Content-Type: application/json' \
+  -d "{\"handle\":\"$IDHANDLE\",\"password\":\"testpass123\"}")
+IDTOKEN=$(echo "$IDLOGIN" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("token",""))')
+assert_contains "id login token" "eyJ" "$IDTOKEN"
+code=$(curl_code /tmp/ft_body "$BASE/idp/accounts/me" -H "Authorization: Bearer $IDTOKEN")
+assert_http "id me after login" "200" "$code"
+assert_contains "id me handle" "$IDHANDLE" "$(cat /tmp/ft_body)"
+code=$(curl_code /tmp/ft_body -X POST "$BASE/idp/logout" -b /tmp/ft_id_cookies)
+assert_http "id logout" "204" "$code"
+
+# --- Spark conversations: save → list → share GET → unshare 404 ---
+code=$(curl_code /tmp/ft_body -X POST "$BASE/conversations" \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  --data '{"title":"Func Spark","messages":[{"role":"user","text":"hello spark"},{"role":"assistant","text":"saved"}]}')
+assert_http "conversation save" "201" "$code"
+assert_contains "conversation title" "Func Spark" "$(cat /tmp/ft_body)"
+CID=$(python3 -c 'import json; print(json.load(open("/tmp/ft_body"))["id"])')
+code=$(curl_code /tmp/ft_body "$BASE/conversations" -H "Authorization: Bearer $TOKEN")
+assert_http "conversation list" "200" "$code"
+assert_contains "conversation list title" "Func Spark" "$(cat /tmp/ft_body)"
+code=$(curl_code /tmp/ft_body -X POST "$BASE/conversations/$CID/share" \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' --data '{"public":false}')
+assert_http "conversation share" "200" "$code"
+SHARE=$(python3 -c 'import json; d=json.load(open("/tmp/ft_body")); print(d["share"]["url"])')
+SHAREPATH=${SHARE#*://}
+SHAREPATH=/${SHAREPATH#*/}
+code=$(curl_code /tmp/ft_body "$SHARE")
+assert_http "share url public GET" "200" "$code"
+assert_contains "share body" "hello spark" "$(cat /tmp/ft_body)"
+code=$(curl_code /tmp/ft_body -X POST "$BASE/conversations/$CID/unshare" \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' --data '{}')
+assert_http "conversation unshare" "200" "$code"
+code=$(curl_code /tmp/ft_body "$SHARE")
+if [[ "$code" == "404" || "$code" == "401" ]]; then
+  green "PASS  unshare share url $code"; PASS=$((PASS+1))
+else
+  red "FAIL  unshare share url (expected 404/401 actual=$code)"
+  FAIL=$((FAIL+1)); ERRORS+=("unshare share url: $code")
+fi
+
 curl -sS -X PUT "$BASE/workspace/n3.ttl" \
   -H "Authorization: Bearer $TOKEN" -H 'Content-Type: text/turtle' \
   --data '<http://ex/s> <http://ex/p> <http://ex/o1> .' >/dev/null

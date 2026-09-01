@@ -314,13 +314,10 @@ function renderSparkTokenBox(info) {
 }
 
 async function sparkTokenFetch(path, opts) {
-  // Prefer Vercel-native mint; fall back to Railway /idp/spark-token when present.
-  const hosted = await fetch("/api/spark-token" + (path || ""), Object.assign({
+  return fetch("/api/spark-token" + (path || ""), Object.assign({
     headers: openidHeaders(opts && opts.headers),
     credentials: "include",
   }, opts || {}));
-  if (hosted.status !== 404) return hosted;
-  return openidFetch("/idp/spark-token" + (path || ""), opts);
 }
 
 async function loadSparkTokenStatus() {

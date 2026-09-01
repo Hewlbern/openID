@@ -88,23 +88,38 @@ function normalizeMessages(inMsgs, text) {
     if (cur && cur.text.trim()) messages.push(cur);
     if (!messages.length && raw.trim()) messages.push({ role: "user", text: raw.trim() });
   }
-  return messages.map((m) => ({ role: m.role, text: String(m.text || "").trim() })).filter((m) => m.text);
+  return messages.map((m) => {
+    const item = { role: m.role, text: String(m.text || "").trim() };
+    if (m.timestamp) item.timestamp = String(m.timestamp);
+    return item;
+  }).filter((m) => m.text);
 }
 
-function turtle(resourceUrl, title, webId, now) {
-  return [
-    "@prefix schema: <https://schema.org/> .",
-    "@prefix dcterms: <http://purl.org/dc/terms/> .",
-    "@prefix foaf: <http://xmlns.com/foaf/0.1/> .",
-    "@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .",
-    "",
-    `<${resourceUrl}> a schema:Conversation ;`,
-    `  schema:name ${JSON.stringify(title)} ;`,
-    `  dcterms:created ${JSON.stringify(now)}^^xsd:dateTime ;`,
-    `  dcterms:modified ${JSON.stringify(now)}^^xsd:dateTime ;`,
-    `  dcterms:source "gemini-spark" ;`,
-    `  schema:creator <${webId || ""}> .`,
-  ].join("\n");
+function turtle(resourceUrl, title, id, webId, now, msgs) {
+  let ttl = `@prefix schema: <https://schema.org/> .
+@prefix dcterms: <http://purl.org/dc/terms/> .
+@prefix foaf: <http://xmlns.com/foaf/0.1/> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+<${resourceUrl}> a schema:Conversation ;
+  schema:name ${JSON.stringify(title)} ;
+  schema:identifier ${JSON.stringify(id)} ;
+  dcterms:created ${JSON.stringify(now)}^^xsd:dateTime ;
+  dcterms:modified ${JSON.stringify(now)}^^xsd:dateTime ;
+  schema:dateCreated ${JSON.stringify(now)}^^xsd:dateTime ;
+  schema:dateModified ${JSON.stringify(now)}^^xsd:dateTime ;
+  dcterms:source "gemini-spark"`;
+  if (webId) ttl += ` ;\n  schema:creator <${webId}> ;\n  foaf:maker <${webId}>`;
+  (msgs || []).forEach((_, i) => { ttl += ` ;\n  schema:hasPart <${resourceUrl}#msg-${i + 1}>`; });
+  ttl += " .\n";
+  (msgs || []).forEach((m, i) => {
+    ttl += `\n<${resourceUrl}#msg-${i + 1}> a schema:Message ;\n  schema:text ${JSON.stringify(m.text)} ;\n  schema:author ${JSON.stringify(m.role)}`;
+    if (m.timestamp) ttl += ` ;\n  schema:dateCreated ${JSON.stringify(m.timestamp)}^^xsd:dateTime ;\n  dcterms:created ${JSON.stringify(m.timestamp)}^^xsd:dateTime`;
+    if (m.role === "assistant") ttl += ` ;\n  foaf:Agent "gemini-spark"`;
+    else if (webId) ttl += ` ;\n  foaf:maker <${webId}>`;
+    ttl += " .\n";
+  });
+  return ttl;
 }
 
 async function save(token, body, origin) {
@@ -162,7 +177,7 @@ async function save(token, body, origin) {
     method: "PUT",
     token,
     headers: { "Content-Type": "text/turtle" },
-    body: turtle(resourceUrl, title, acc.webId, now),
+    body: turtle(resourceUrl, title, id, acc.webId, now, messages),
   });
   if (putTtl.status >= 400) throw new Error("PUT ttl " + putTtl.status + " " + putTtl.text);
 
@@ -225,3 +240,6 @@ module.exports = async function handler(req, res) {
     res.status(400).json({ error: String(e.message || e) });
   }
 };
+
+module.exports.normalizeMessages = normalizeMessages;
+module.exports.turtle = turtle;

@@ -2,6 +2,7 @@ package authn
 
 import (
 	"crypto/ed25519"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -9,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -16,9 +18,15 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
+const (
+	AudienceSparkMCP = "spark-mcp"
+	ScopeSpark       = "spark"
+)
+
 var (
 	ErrUnauthorized = errors.New("unauthorized")
 	ErrInvalidToken = errors.New("invalid token")
+	ErrRevoked      = errors.New("token revoked")
 )
 
 // Credentials holds authenticated agent identity.
@@ -26,6 +34,17 @@ type Credentials struct {
 	WebID  string
 	Client string
 	Via    string // bearer, dpop, client_credentials, agent_sig
+	Scope  string
+	Aud    string
+	JTI    string
+}
+
+// IsSpark reports whether these credentials are a Spark connect token.
+func (c *Credentials) IsSpark() bool {
+	if c == nil {
+		return false
+	}
+	return c.Aud == AudienceSparkMCP || c.Scope == ScopeSpark
 }
 
 // TokenService issues and validates JWTs bound to WebIDs.
@@ -34,6 +53,7 @@ type TokenService struct {
 	mu     sync.RWMutex
 	// dpopJTIs for replay protection (short-lived)
 	dpopSeen map[string]time.Time
+	revoked  map[string]bool
 }
 
 func NewTokenService(secret string) *TokenService {
@@ -43,13 +63,24 @@ func NewTokenService(secret string) *TokenService {
 	return &TokenService{
 		secret:   []byte(secret),
 		dpopSeen: map[string]time.Time{},
+		revoked:  map[string]bool{},
 	}
 }
 
 type webIDClaims struct {
 	WebID  string `json:"webid"`
 	Client string `json:"client_id,omitempty"`
+	Scope  string `json:"scope,omitempty"`
 	jwt.RegisteredClaims
+}
+
+func (c *webIDClaims) sparkAudience() string {
+	for _, a := range c.Audience {
+		if a == AudienceSparkMCP {
+			return a
+		}
+	}
+	return ""
 }
 
 func (t *TokenService) Issue(webID, client string, ttl time.Duration) (string, error) {
@@ -69,6 +100,53 @@ func (t *TokenService) Issue(webID, client string, ttl time.Duration) (string, e
 	return tok.SignedString(t.secret)
 }
 
+// IssueSpark mints a short-lived Spark connect token (aud=spark-mcp, scope=spark).
+func (t *TokenService) IssueSpark(webID string, ttl time.Duration) (token, jti string, exp time.Time, err error) {
+	if ttl <= 0 {
+		ttl = SparkTokenTTL()
+	}
+	jti, err = randomJTI()
+	if err != nil {
+		return "", "", time.Time{}, err
+	}
+	exp = time.Now().UTC().Add(ttl)
+	claims := webIDClaims{
+		WebID: webID,
+		Scope: ScopeSpark,
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(exp),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			Subject:   webID,
+			ID:        jti,
+			Audience:  jwt.ClaimStrings{AudienceSparkMCP},
+		},
+	}
+	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	signed, err := tok.SignedString(t.secret)
+	if err != nil {
+		return "", "", time.Time{}, err
+	}
+	return signed, jti, exp, nil
+}
+
+func (t *TokenService) RevokeJTI(jti string) {
+	if jti == "" {
+		return
+	}
+	t.mu.Lock()
+	t.revoked[jti] = true
+	t.mu.Unlock()
+}
+
+func (t *TokenService) IsRevoked(jti string) bool {
+	if jti == "" {
+		return false
+	}
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.revoked[jti]
+}
+
 func (t *TokenService) Parse(token string) (*Credentials, error) {
 	parsed, err := jwt.ParseWithClaims(token, &webIDClaims{}, func(token *jwt.Token) (interface{}, error) {
 		if token.Method != jwt.SigningMethodHS256 {
@@ -83,7 +161,22 @@ func (t *TokenService) Parse(token string) (*Credentials, error) {
 	if !ok || !parsed.Valid {
 		return nil, ErrInvalidToken
 	}
-	return &Credentials{WebID: claims.WebID, Client: claims.Client, Via: "bearer"}, nil
+	aud := claims.sparkAudience()
+	scope := claims.Scope
+	if aud == AudienceSparkMCP && scope == "" {
+		scope = ScopeSpark
+	}
+	if claims.ID != "" && t.IsRevoked(claims.ID) {
+		return nil, ErrRevoked
+	}
+	return &Credentials{
+		WebID:  claims.WebID,
+		Client: claims.Client,
+		Via:    "bearer",
+		Scope:  scope,
+		Aud:    aud,
+		JTI:    claims.ID,
+	}, nil
 }
 
 // Extract from Authorization / DPoP / agent signature headers.
@@ -245,4 +338,56 @@ func abs(x int64) int64 {
 		return -x
 	}
 	return x
+}
+
+// SparkTokenTTL is the default connect-token lifetime (30 days). Override with SOLID_SPARK_TOKEN_TTL (Go duration).
+func SparkTokenTTL() time.Duration {
+	if v := strings.TrimSpace(os.Getenv("SOLID_SPARK_TOKEN_TTL")); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			return d
+		}
+	}
+	return 30 * 24 * time.Hour
+}
+
+func randomJTI() (string, error) {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b[:]), nil
+}
+
+// HandleFromWebID returns the pod handle encoded in a typical OpenID WebID.
+func HandleFromWebID(webID string) string {
+	s := strings.TrimSpace(webID)
+	if i := strings.Index(s, "#"); i >= 0 {
+		s = s[:i]
+	}
+	s = strings.TrimSuffix(s, "/profile/card")
+	s = strings.TrimRight(s, "/")
+	if i := strings.LastIndex(s, "/"); i >= 0 {
+		return s[i+1:]
+	}
+	return s
+}
+
+// SparkPathAllowed reports whether a Spark connect token may touch path.
+// Only the owner's conversations/ container (and children) is in scope.
+func SparkPathAllowed(webID, path, method string) bool {
+	handle := HandleFromWebID(webID)
+	if handle == "" {
+		return false
+	}
+	path = strings.TrimPrefix(path, "/")
+	prefix := handle + "/conversations"
+	if path != prefix && path != prefix+"/" && !strings.HasPrefix(path, prefix+"/") {
+		return false
+	}
+	switch strings.ToUpper(method) {
+	case http.MethodGet, http.MethodHead, http.MethodOptions, http.MethodPut, http.MethodPost, http.MethodPatch, http.MethodDelete:
+		return true
+	default:
+		return false
+	}
 }

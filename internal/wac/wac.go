@@ -254,14 +254,47 @@ func DefaultPublicACL(resourceURL, ownerWebID string) string {
 	g.AddIRI("#authenticated", ACL+"mode", ModeAppend)
 
 	if ownerWebID != "" {
-		g.AddIRI("#owner", "http://www.w3.org/1999/02/22-rdf-syntax-ns#type", ACL+"Authorization")
-		g.AddIRI("#owner", ACL+"agent", ownerWebID)
-		g.AddIRI("#owner", ACL+"accessTo", resourceURL)
-		g.AddIRI("#owner", ACL+"default", resourceURL)
-		g.AddIRI("#owner", ACL+"mode", ModeRead)
-		g.AddIRI("#owner", ACL+"mode", ModeWrite)
-		g.AddIRI("#owner", ACL+"mode", ModeAppend)
-		g.AddIRI("#owner", ACL+"mode", ModeControl)
+		addOwnerAuth(g, resourceURL, ownerWebID)
+	}
+	return rdf.SerializeTurtle(g, prefixes)
+}
+
+func addOwnerAuth(g *rdf.Graph, resourceURL, ownerWebID string) {
+	g.AddIRI("#owner", "http://www.w3.org/1999/02/22-rdf-syntax-ns#type", ACL+"Authorization")
+	g.AddIRI("#owner", ACL+"agent", ownerWebID)
+	g.AddIRI("#owner", ACL+"accessTo", resourceURL)
+	g.AddIRI("#owner", ACL+"default", resourceURL)
+	g.AddIRI("#owner", ACL+"mode", ModeRead)
+	g.AddIRI("#owner", ACL+"mode", ModeWrite)
+	g.AddIRI("#owner", ACL+"mode", ModeAppend)
+	g.AddIRI("#owner", ACL+"mode", ModeControl)
+}
+
+// OwnerOnlyACL grants the owner Read/Write/Append/Control and nobody else.
+func OwnerOnlyACL(resourceURL, ownerWebID string) string {
+	g := rdf.NewGraph()
+	prefixes := map[string]string{
+		"acl":  ACL,
+		"foaf": FOAF,
+	}
+	addOwnerAuth(g, resourceURL, ownerWebID)
+	return rdf.SerializeTurtle(g, prefixes)
+}
+
+// PublicReadACL grants foaf:Agent Read and the owner full control.
+func PublicReadACL(resourceURL, ownerWebID string) string {
+	g := rdf.NewGraph()
+	prefixes := map[string]string{
+		"acl":  ACL,
+		"foaf": FOAF,
+	}
+	g.AddIRI("#public", "http://www.w3.org/1999/02/22-rdf-syntax-ns#type", ACL+"Authorization")
+	g.AddIRI("#public", ACL+"agentClass", FOAF+"Agent")
+	g.AddIRI("#public", ACL+"accessTo", resourceURL)
+	g.AddIRI("#public", ACL+"default", resourceURL)
+	g.AddIRI("#public", ACL+"mode", ModeRead)
+	if ownerWebID != "" {
+		addOwnerAuth(g, resourceURL, ownerWebID)
 	}
 	return rdf.SerializeTurtle(g, prefixes)
 }

@@ -3,12 +3,15 @@ package openidmcp
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
+
+	"solid-go/internal/authn"
 )
 
 // Tool is an MCP tool descriptor.
@@ -16,6 +19,23 @@ type Tool struct {
 	Name        string         `json:"name"`
 	Description string         `json:"description"`
 	InputSchema map[string]any `json:"inputSchema"`
+}
+
+func (s *Server) denySparkLocked(name, token string) error {
+	if s.Tokens == nil || strings.TrimSpace(token) == "" {
+		return nil
+	}
+	creds, err := s.Tokens.Parse(token)
+	if err != nil {
+		if errors.Is(err, authn.ErrRevoked) {
+			return fmt.Errorf("spark connect token revoked")
+		}
+		return nil
+	}
+	if creds.IsSpark() && !strings.HasPrefix(name, "spark_") {
+		return fmt.Errorf("spark connect token cannot call %s", name)
+	}
+	return nil
 }
 
 func objectSchema(props map[string]any, required ...string) map[string]any {
@@ -37,7 +57,7 @@ func strProp(desc string) map[string]any {
 func Tools() []Tool {
 	token := strProp("Bearer token from login, register, or register_agent")
 	path := strProp("Pod-relative path, e.g. mike/public/note.json")
-	return []Tool{
+	base := []Tool{
 		{Name: "openid_open", Description: "Open the local OpenID system: dashboard URL, MCP endpoint, health, and how grokbot should use it.", InputSchema: objectSchema(nil)},
 		{Name: "openid_status", Description: "Health and /api/status of the OpenID Solid server.", InputSchema: objectSchema(nil)},
 		{Name: "openid_discover", Description: "OIDC and Solid well-known discovery documents.", InputSchema: objectSchema(nil)},
@@ -76,6 +96,7 @@ func Tools() []Tool {
 		{Name: "openid_audit_flush", Description: "Flush the Merkle/OTS audit batch.", InputSchema: objectSchema(nil)},
 		{Name: "openid_audit_verify", Description: "Verify one audit event by id.", InputSchema: objectSchema(map[string]any{"id": strProp("Event id")}, "id")},
 	}
+	return append(base, sparkTools()...)
 }
 
 type httpResult struct {
@@ -86,7 +107,21 @@ type httpResult struct {
 	URL     string            `json:"url,omitempty"`
 }
 
-func (s *Server) callTool(name string, args json.RawMessage) *CallResult {
+func (s *Server) callTool(name string, args json.RawMessage, bearer string) *CallResult {
+	tokenHint := bearer
+	if tokenHint == "" && len(args) > 0 {
+		var peek struct {
+			Token string `json:"token"`
+		}
+		_ = json.Unmarshal(args, &peek)
+		tokenHint = peek.Token
+	}
+	if err := s.denySparkLocked(name, tokenHint); err != nil {
+		return textResult(nil, err)
+	}
+	if strings.HasPrefix(name, "spark_") {
+		return s.callSpark(name, args, bearer)
+	}
 	switch name {
 	case "openid_open":
 		return textResult(s.toolOpen(), nil)
@@ -259,7 +294,15 @@ func (s *Server) toolOpen() map[string]any {
 				"Call openid_open or openid_status",
 				"Call openid_register_agent (or openid_login) to get a token",
 				"Call openid_pod_put / openid_pod_get with that token",
+				"Call spark_save_conversation / spark_list_conversations to store Gemini Spark threads",
 				"Call openid_audit_flush then openid_audit_verify for receipts",
+			},
+			"spark": map[string]any{
+				"mcp":    s.BaseURL + "/mcp",
+				"stdio":  "go run ./cmd/mcp  (OPENID_BASE_URL=" + s.BaseURL + ")",
+				"auth":   "Bearer token from openid_login, or Authorization header on HTTP /mcp",
+				"prompt": "Save this conversation to my Solid pod.",
+				"tool":   "spark_save_conversation",
 			},
 		},
 	}

@@ -244,6 +244,80 @@ code=$(curl_code /tmp/ft_body "$BASE/idp/accounts/me" -H "Authorization: Bearer 
 assert_http "accounts/me bearer" "200" "$code"
 assert_contains "accounts/me email" "func@example.com" "$(cat /tmp/ft_body)"
 
+# --- Identity session: register → login → me → logout ---
+IDHANDLE="id$(date +%s)"
+IDREG=$(curl -sS -c /tmp/ft_id_cookies -X POST "$BASE/idp/register" \
+  -H 'Content-Type: application/json' \
+  -d "{\"handle\":\"$IDHANDLE\",\"password\":\"testpass123\",\"name\":\"ID User\",\"createPod\":true}")
+echo "$IDREG" > /tmp/ft_idreg.json
+IDTOKEN=$(python3 -c 'import json; print(json.load(open("/tmp/ft_idreg.json"))["token"])')
+assert_contains "id register token" "eyJ" "$IDTOKEN"
+IDLOGIN=$(curl -sS -c /tmp/ft_id_cookies -X POST "$BASE/idp/login" \
+  -H 'Content-Type: application/json' \
+  -d "{\"handle\":\"$IDHANDLE\",\"password\":\"testpass123\"}")
+IDTOKEN=$(echo "$IDLOGIN" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("token",""))')
+assert_contains "id login token" "eyJ" "$IDTOKEN"
+code=$(curl_code /tmp/ft_body "$BASE/idp/accounts/me" -H "Authorization: Bearer $IDTOKEN")
+assert_http "id me after login" "200" "$code"
+assert_contains "id me handle" "$IDHANDLE" "$(cat /tmp/ft_body)"
+code=$(curl_code /tmp/ft_body -X POST "$BASE/idp/logout" -b /tmp/ft_id_cookies)
+assert_http "id logout" "204" "$code"
+
+# --- Spark conversations: save → list → share GET → unshare 404 ---
+code=$(curl_code /tmp/ft_body -X POST "$BASE/conversations" \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  --data '{"title":"Func Spark","messages":[{"role":"user","text":"hello spark","timestamp":"2026-09-01T20:15:30+10:00"},{"role":"assistant","text":"saved","timestamp":"2026-09-01T10:16:00Z"}]}')
+assert_http "conversation save" "201" "$code"
+assert_contains "conversation title" "Func Spark" "$(cat /tmp/ft_body)"
+assert_contains "conversation confirmation" "resourceUrl" "$(cat /tmp/ft_body)"
+assert_contains "conversation webId" "webId" "$(cat /tmp/ft_body)"
+CID=$(python3 -c 'import json; print(json.load(open("/tmp/ft_body"))["id"])')
+RESURL=$(python3 -c 'import json; print(json.load(open("/tmp/ft_body")).get("resourceUrl",""))')
+code=$(curl_code /tmp/ft_body -H "Authorization: Bearer $TOKEN" -H 'Accept: application/ld+json' "$RESURL")
+assert_http "conversation jsonld GET" "200" "$code"
+assert_contains "jsonld created" "dateCreated" "$(cat /tmp/ft_body)"
+body=$(cat /tmp/ft_body)
+if [[ "$body" == *2026-09-01T10:15:30Z* || "$body" == *2026-09-01T20:15:30+10:00* ]]; then
+  green "PASS  jsonld message time"; PASS=$((PASS+1))
+else
+  red "FAIL  jsonld message time"; FAIL=$((FAIL+1)); ERRORS+=("jsonld message time")
+fi
+TTLURL=${RESURL%.json}.ttl
+code=$(curl_code /tmp/ft_body -H "Authorization: Bearer $TOKEN" -H 'Accept: text/turtle' "$TTLURL")
+assert_http "conversation ttl GET" "200" "$code"
+ttlbody=$(cat /tmp/ft_body)
+if [[ "$ttlbody" == *dcterms:created* || "$ttlbody" == *purl.org/dc/terms/created* ]]; then
+  green "PASS  ttl dcterms created"; PASS=$((PASS+1))
+else
+  red "FAIL  ttl dcterms created"; FAIL=$((FAIL+1)); ERRORS+=("ttl dcterms created")
+fi
+code=$(curl_code /tmp/ft_body -X POST "$RESURL" \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' --data '{}')
+assert_http "POST to conversation document is 400" "400" "$code"
+assert_contains "POST document error" "Can only POST to containers" "$(cat /tmp/ft_body)"
+code=$(curl_code /tmp/ft_body "$BASE/conversations" -H "Authorization: Bearer $TOKEN")
+assert_http "conversation list" "200" "$code"
+assert_contains "conversation list title" "Func Spark" "$(cat /tmp/ft_body)"
+code=$(curl_code /tmp/ft_body -X POST "$BASE/conversations/$CID/share" \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' --data '{"public":false}')
+assert_http "conversation share" "200" "$code"
+SHARE=$(python3 -c 'import json; d=json.load(open("/tmp/ft_body")); print(d["share"]["url"])')
+SHAREPATH=${SHARE#*://}
+SHAREPATH=/${SHAREPATH#*/}
+code=$(curl_code /tmp/ft_body "$SHARE")
+assert_http "share url public GET" "200" "$code"
+assert_contains "share body" "hello spark" "$(cat /tmp/ft_body)"
+code=$(curl_code /tmp/ft_body -X POST "$BASE/conversations/$CID/unshare" \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' --data '{}')
+assert_http "conversation unshare" "200" "$code"
+code=$(curl_code /tmp/ft_body "$SHARE")
+if [[ "$code" == "404" || "$code" == "401" ]]; then
+  green "PASS  unshare share url $code"; PASS=$((PASS+1))
+else
+  red "FAIL  unshare share url (expected 404/401 actual=$code)"
+  FAIL=$((FAIL+1)); ERRORS+=("unshare share url: $code")
+fi
+
 curl -sS -X PUT "$BASE/workspace/n3.ttl" \
   -H "Authorization: Bearer $TOKEN" -H 'Content-Type: text/turtle' \
   --data '<http://ex/s> <http://ex/p> <http://ex/o1> .' >/dev/null
@@ -269,6 +343,32 @@ code=$(curl_code /tmp/ft_body -D /tmp/ft_hdr -X OPTIONS "$BASE/agents" \
   -H 'Origin: http://example.com' -H 'Access-Control-Request-Method: POST')
 assert_http "CORS preflight" "204" "$code"
 assert_contains "CORS allow origin" "Access-Control-Allow-Origin" "$(cat /tmp/ft_hdr)"
+
+# --- Spark connect token: mint → save → revoke ---
+SPARKMINT=$(curl -sS -X POST "$BASE/idp/spark-token" \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{}')
+echo "$SPARKMINT" > /tmp/ft_spark_mint.json
+SPARKTOK=$(python3 -c 'import json; print(json.load(open("/tmp/ft_spark_mint.json")).get("token",""))')
+assert_contains "spark connect token jwt" "eyJ" "$SPARKTOK"
+assert_contains "spark connect aud" "spark-mcp" "$SPARKMINT"
+code=$(curl_code /tmp/ft_body -X POST "$BASE/conversations" \
+  -H "Authorization: Bearer $SPARKTOK" -H 'Content-Type: application/json' \
+  --data '{"title":"Spark token","messages":[{"role":"user","text":"via connect token"}]}')
+assert_http "spark token conversation save" "201" "$code"
+code=$(curl_code /tmp/ft_body -X PUT "$BASE/workspace/from-spark.txt" \
+  -H "Authorization: Bearer $SPARKTOK" -H 'Content-Type: text/plain' --data 'nope')
+assert_http "spark token cannot write workspace" "403" "$code"
+code=$(curl_code /tmp/ft_body -X DELETE "$BASE/idp/spark-token" -H "Authorization: Bearer $TOKEN")
+assert_http "spark token revoke" "200" "$code"
+code=$(curl_code /tmp/ft_body -X POST "$BASE/conversations" \
+  -H "Authorization: Bearer $SPARKTOK" -H 'Content-Type: application/json' \
+  --data '{"title":"after revoke","messages":[{"role":"user","text":"no"}]}')
+if [[ "$code" == "401" || "$code" == "400" ]]; then
+  green "PASS  revoked spark token rejected ($code)"; PASS=$((PASS+1))
+else
+  red "FAIL  revoked spark token (expected 401/400 actual=$code)"
+  FAIL=$((FAIL+1)); ERRORS+=("revoked spark token: $code")
+fi
 
 # SSE notification on create
 set +e

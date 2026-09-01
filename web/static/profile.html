@@ -31,7 +31,7 @@
       String(s || "").split("").forEach((c) => { n = (n * 31 + c.charCodeAt(0)) % 360; });
       return n;
     }
-    fetch(openidURL("/i/" + encodeURIComponent(handle)), { headers: { Accept: "application/json" } })
+    openidFetch("/i/" + encodeURIComponent(handle), { headers: { Accept: "application/json" } })
       .then((r) => { if (!r.ok) throw r; return r.json(); })
       .then((p) => {
         document.title = (p.name || p.handle) + " — oid";

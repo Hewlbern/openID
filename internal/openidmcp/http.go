@@ -49,7 +49,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	resp := s.Handle(body)
+	resp := s.HandleWithAuth(body, bearerFromRequest(r))
 	w.Header().Set("Mcp-Session-Id", "openid-local")
 	if resp == nil {
 		w.WriteHeader(http.StatusAccepted)
@@ -71,4 +71,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(raw)
+}
+
+func bearerFromRequest(r *http.Request) string {
+	auth := r.Header.Get("Authorization")
+	if len(auth) < 8 || !strings.EqualFold(auth[:7], "Bearer ") {
+		return ""
+	}
+	return strings.TrimSpace(auth[7:])
 }

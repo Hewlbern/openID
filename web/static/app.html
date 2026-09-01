@@ -20,23 +20,43 @@
   <section class="shell" id="shell">
     <div class="toolbar">
       <label class="search">
-        <input id="q" type="search" placeholder="Search conversations" />
+        <input id="q" type="search" placeholder="Search conversations/spark/" />
       </label>
+      <button type="button" class="btn" id="saveBtn">Import</button>
+      <button type="button" class="ghost" id="youBtn">You</button>
       <span class="who" id="who"></span>
-      <span class="face" id="meFace"></span>
+      <span class="face" id="meFace" title="You"></span>
       <a class="ghost" href="/records">Records</a>
       <button type="button" class="ghost" id="logout">Sign out</button>
     </div>
     <div class="split">
-      <ul class="convos" id="list"></ul>
+      <aside class="rail">
+        <div class="rail-head">
+          <strong>From your pod</strong>
+          <small class="mono" id="podPathLabel">conversations/spark/</small>
+        </div>
+        <ul class="convos" id="list"></ul>
+      </aside>
       <article class="detail" id="detail">
         <div class="empty-state">
           <span class="mark hero" aria-hidden="true"></span>
-          <p>Pick a conversation.</p>
+          <p>Signing you in…</p>
         </div>
       </article>
     </div>
   </section>
+
+  <div class="modal-bg" id="saveModal">
+    <form class="modal wide" id="saveForm">
+      <h3>Import a Spark / Gemini thread</h3>
+      <p>Paste a transcript or a public Gemini share URL. This does not sign into Google.</p>
+      <div class="field"><label>Title (optional)</label><input id="saveTitle" name="title" placeholder="Untitled conversation" /></div>
+      <div class="field"><label>Public Gemini share URL (optional)</label><input id="saveURL" name="source_url" placeholder="https://g.co/gemini/share/…" /></div>
+      <div class="field"><label>Transcript</label><textarea id="saveText" name="text" placeholder="**User:** …&#10;**Gemini:** …" rows="8"></textarea></div>
+      <p class="hint" id="saveHint"></p>
+      <button class="btn wide" type="submit">Save to my pod</button>
+    </form>
+  </div>
   <script src="/static/app.js"></script>
 </body>
 </html>

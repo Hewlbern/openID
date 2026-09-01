@@ -11,10 +11,15 @@ import (
 	"testing"
 	"time"
 
+	"solid-go/internal/authn"
+	"solid-go/internal/identityapi"
 	"solid-go/internal/logging"
 	"solid-go/internal/openidmcp"
+	"solid-go/internal/resourcestore"
 	"solid-go/internal/server"
+	"solid-go/internal/solid"
 	"solid-go/internal/storage"
+	"solid-go/internal/wac"
 )
 
 func startOpenID(t *testing.T) (*httptest.Server, *openidmcp.Server) {
@@ -164,6 +169,7 @@ func TestProtocolInitializeListPing(t *testing.T) {
 		"openid_open", "openid_status", "openid_discover", "openid_register",
 		"openid_login", "openid_register_agent", "openid_pod_put", "openid_pod_get",
 		"openid_client_credentials", "openid_token", "openid_audit_flush", "openid_audit_verify",
+		"spark_save_conversation", "spark_list_conversations", "spark_share_conversation",
 	} {
 		if !names[want] {
 			t.Fatalf("missing tool %s", want)
@@ -448,5 +454,446 @@ func TestMountedMCPOnSolidServer(t *testing.T) {
 	html.Body.Close()
 	if html.StatusCode != 200 || !bytes.Contains(hbody, []byte("Solid server")) {
 		t.Fatalf("dashboard: %d %s", html.StatusCode, hbody[:min(200, len(hbody))])
+	}
+}
+
+func TestSparkConversationTools(t *testing.T) {
+	ts, mcp := startOpenID(t)
+	reg := callTool(t, mcp, "openid_register", map[string]any{
+		"handle": "spark", "password": "testpass123", "name": "Spark User",
+	})
+	token := reg["json"].(map[string]any)["token"].(string)
+	saved := callTool(t, mcp, "spark_save_conversation", map[string]any{
+		"token": token,
+		"title": "From Spark",
+		"messages": []any{
+			map[string]any{"role": "user", "text": "hello from spark"},
+			map[string]any{"role": "assistant", "text": "saved in your pod"},
+		},
+	})
+	id := sparkSaveID(saved)
+	if id == "" {
+		t.Fatalf("save: %#v", saved)
+	}
+	if saved["confirmation"] == nil && saved["resourceUrl"] == nil {
+		if inner, ok := saved["json"].(map[string]any); ok {
+			saved = inner
+		}
+	}
+	listed := callTool(t, mcp, "spark_list_conversations", map[string]any{"token": token})
+	listDump, _ := json.Marshal(listed)
+	if !strings.Contains(string(listDump), "From Spark") {
+		t.Fatalf("list: %#v", listed)
+	}
+	got := callTool(t, mcp, "spark_get_conversation", map[string]any{"id": id, "token": token})
+	if !strings.Contains(fmtJSON(got), "hello from spark") {
+		t.Fatalf("get: %#v", got)
+	}
+	shared := callTool(t, mcp, "spark_share_conversation", map[string]any{"id": id, "token": token})
+	shareObj := shared["json"].(map[string]any)
+	share := shareObj["share"].(map[string]any)
+	url, _ := share["url"].(string)
+	if url == "" {
+		t.Fatalf("share url: %#v", shared)
+	}
+	pub, err := http.Get(strings.Replace(url, ts.URL, ts.URL, 1))
+	if err != nil {
+		// share URL uses BaseURL from the solid server (ts.URL)
+		pub, err = http.Get(url)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	pbody, _ := io.ReadAll(pub.Body)
+	pub.Body.Close()
+	if pub.StatusCode != 200 || !bytes.Contains(pbody, []byte("hello from spark")) {
+		t.Fatalf("public share %d %s", pub.StatusCode, pbody)
+	}
+	_ = callTool(t, mcp, "spark_unshare_conversation", map[string]any{"id": id, "token": token})
+	gone, err := http.Get(url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gone.Body.Close()
+	if gone.StatusCode != 404 && gone.StatusCode != 401 {
+		t.Fatalf("unshare status %d", gone.StatusCode)
+	}
+}
+
+func fmtJSON(v any) string {
+	b, _ := json.Marshal(v)
+	return string(b)
+}
+
+func sparkSaveID(saved map[string]any) string {
+	if id, _ := saved["id"].(string); id != "" {
+		return id
+	}
+	if inner, ok := saved["json"].(map[string]any); ok {
+		id, _ := inner["id"].(string)
+		return id
+	}
+	return ""
+}
+
+func TestSparkSaveTimestampsAndRDF(t *testing.T) {
+	ts, mcp := startOpenID(t)
+	reg := callTool(t, mcp, "openid_register", map[string]any{
+		"handle": "timed", "password": "testpass123", "name": "Timed User",
+	})
+	token := reg["json"].(map[string]any)["token"].(string)
+	userTS := "2026-09-01T20:15:30+10:00"
+	assistTS := "2026-09-01T10:16:00Z"
+	saved := callTool(t, mcp, "spark_save_conversation", map[string]any{
+		"token": token,
+		"title": "Timed Spark",
+		"messages": []any{
+			map[string]any{"role": "user", "content": "save this thread", "timestamp": userTS},
+			map[string]any{"role": "assistant", "text": "uploaded to your pod", "timestamp": assistTS},
+		},
+	})
+	id := sparkSaveID(saved)
+	if id == "" {
+		t.Fatalf("save id missing: %#v", saved)
+	}
+	resourceURL, _ := saved["resourceUrl"].(string)
+	webID, _ := saved["webId"].(string)
+	confirm, _ := saved["confirmation"].(string)
+	if resourceURL == "" || webID == "" || confirm == "" {
+		t.Fatalf("spark save result missing fields: %#v", saved)
+	}
+	if !strings.Contains(resourceURL, "conversations/spark/") || !strings.HasSuffix(resourceURL, ".json") {
+		t.Fatalf("resourceUrl %s", resourceURL)
+	}
+	if saved["created"] == nil && saved["modified"] == nil {
+		t.Fatalf("created/modified missing: %#v", saved)
+	}
+
+	jsonReq, _ := http.NewRequest(http.MethodGet, resourceURL, nil)
+	jsonReq.Header.Set("Authorization", "Bearer "+token)
+	jsonReq.Header.Set("Accept", "application/ld+json, application/json")
+	jsonResp, err := ts.Client().Do(jsonReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	jbody, _ := io.ReadAll(jsonResp.Body)
+	jsonResp.Body.Close()
+	if jsonResp.StatusCode != 200 {
+		t.Fatalf("GET json %d %s", jsonResp.StatusCode, jbody)
+	}
+	js := string(jbody)
+	for _, needle := range []string{"dateCreated", "dateModified", `"created"`, "gemini-spark", "save this thread", "2026-09-01T10:16:00Z"} {
+		if !strings.Contains(js, needle) {
+			t.Fatalf("json missing %s\n%s", needle, js)
+		}
+	}
+	if !strings.Contains(js, "2026-09-01T10:15:30Z") && !strings.Contains(js, "2026-09-01T20:15:30+10:00") {
+		t.Fatalf("json missing user timestamp\n%s", js)
+	}
+
+	ttlURL := strings.TrimSuffix(resourceURL, ".json") + ".ttl"
+	ttlReq, _ := http.NewRequest(http.MethodGet, ttlURL, nil)
+	ttlReq.Header.Set("Authorization", "Bearer "+token)
+	ttlReq.Header.Set("Accept", "text/turtle")
+	ttlResp, err := ts.Client().Do(ttlReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tbody, _ := io.ReadAll(ttlResp.Body)
+	ttlResp.Body.Close()
+	if ttlResp.StatusCode != 200 {
+		t.Fatalf("GET ttl %d %s", ttlResp.StatusCode, tbody)
+	}
+	ttl := string(tbody)
+	if !strings.Contains(ttl, "purl.org/dc/terms/created") && !strings.Contains(ttl, "dcterms:created") {
+		t.Fatalf("ttl missing created\n%s", ttl)
+	}
+	if !strings.Contains(ttl, "schema.org/Conversation") && !strings.Contains(ttl, "schema:Conversation") {
+		t.Fatalf("ttl missing Conversation type\n%s", ttl)
+	}
+	if !strings.Contains(ttl, "schema.org/Message") && !strings.Contains(ttl, "schema:Message") {
+		t.Fatalf("ttl missing Message type\n%s", ttl)
+	}
+	if !strings.Contains(ttl, "gemini-spark") {
+		t.Fatalf("ttl missing source\n%s", ttl)
+	}
+	if !strings.Contains(ttl, "2026-09-01T10:15:30Z") && !strings.Contains(ttl, "2026-09-01T20:15:30+10:00") {
+		t.Fatalf("ttl missing message timestamp\n%s", ttl)
+	}
+
+	// Regression: LDP POST to the saved JSON document must fail with the container error.
+	postReq, _ := http.NewRequest(http.MethodPost, resourceURL, strings.NewReader(`{}`))
+	postReq.Header.Set("Authorization", "Bearer "+token)
+	postReq.Header.Set("Content-Type", "application/json")
+	postResp, err := ts.Client().Do(postReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pbody, _ := io.ReadAll(postResp.Body)
+	postResp.Body.Close()
+	if postResp.StatusCode != http.StatusBadRequest || !bytes.Contains(pbody, []byte("Can only POST to containers")) {
+		t.Fatalf("POST to document want 400 container error, got %d %s", postResp.StatusCode, pbody)
+	}
+
+	listed := mustRPC(t, mcp, "tools/list", 1, nil)
+	dump, _ := json.Marshal(listed)
+	if !bytes.Contains(dump, []byte("When the user asks to save")) {
+		t.Fatalf("tool description should tell Spark to call this tool: %s", dump)
+	}
+}
+
+func mcpHTTPCall(t *testing.T, ts *httptest.Server, name string, args map[string]any, bearer string) (map[string]any, bool, string) {
+	t.Helper()
+	reqBody, _ := json.Marshal(map[string]any{
+		"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+		"params": map[string]any{"name": name, "arguments": args},
+	})
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/mcp", bytes.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	if bearer != "" {
+		req.Header.Set("Authorization", "Bearer "+bearer)
+	}
+	resp, err := ts.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	var rpc map[string]any
+	if err := json.Unmarshal(raw, &rpc); err != nil {
+		t.Fatalf("rpc %s", raw)
+	}
+	result, _ := rpc["result"].(map[string]any)
+	isErr, _ := result["isError"].(bool)
+	content, _ := result["content"].([]any)
+	text := ""
+	if len(content) > 0 {
+		item, _ := content[0].(map[string]any)
+		text, _ = item["text"].(string)
+	}
+	var parsed map[string]any
+	_ = json.Unmarshal([]byte(text), &parsed)
+	return parsed, isErr, text
+}
+
+func TestSparkConnectTokenMintSaveRevokeAndIsolation(t *testing.T) {
+	ts, _ := startOpenID(t)
+	reg := httptest.NewRequest(http.MethodPost, "/idp/register", strings.NewReader(
+		`{"handle":"alice","password":"testpass123","name":"Alice","createPod":true}`))
+	reg.Header.Set("Content-Type", "application/json")
+	regRec := httptest.NewRecorder()
+	ts.Config.Handler.ServeHTTP(regRec, reg)
+	if regRec.Code != 200 {
+		t.Fatalf("alice register %d %s", regRec.Code, regRec.Body.String())
+	}
+	var alice map[string]any
+	_ = json.Unmarshal(regRec.Body.Bytes(), &alice)
+	aliceTok, _ := alice["token"].(string)
+
+	mintReq, _ := http.NewRequest(http.MethodPost, ts.URL+"/idp/spark-token", strings.NewReader(`{}`))
+	mintReq.Header.Set("Authorization", "Bearer "+aliceTok)
+	mintReq.Header.Set("Content-Type", "application/json")
+	mintResp, err := ts.Client().Do(mintReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mintRaw, _ := io.ReadAll(mintResp.Body)
+	mintResp.Body.Close()
+	if mintResp.StatusCode != 200 {
+		t.Fatalf("mint %d %s", mintResp.StatusCode, mintRaw)
+	}
+	var minted map[string]any
+	_ = json.Unmarshal(mintRaw, &minted)
+	sparkTok, _ := minted["token"].(string)
+	if sparkTok == "" || minted["aud"] != "spark-mcp" || minted["scope"] != "spark" {
+		t.Fatalf("mint body %s", mintRaw)
+	}
+
+	saved, isErr, text := mcpHTTPCall(t, ts, "spark_save_conversation", map[string]any{
+		"title": "Connect token thread",
+		"messages": []any{
+			map[string]any{"role": "user", "content": "save via spark token", "timestamp": "2026-09-01T12:00:00Z"},
+			map[string]any{"role": "assistant", "text": "stored"},
+		},
+	}, sparkTok)
+	if isErr || sparkSaveID(saved) == "" {
+		t.Fatalf("spark save with connect token: err=%v %s %#v", isErr, text, saved)
+	}
+	if saved["webId"] == nil || saved["resourceUrl"] == nil {
+		t.Fatalf("save result %#v", saved)
+	}
+
+	deniedMint, _ := http.NewRequest(http.MethodPost, ts.URL+"/idp/spark-token", strings.NewReader(`{}`))
+	deniedMint.Header.Set("Authorization", "Bearer "+sparkTok)
+	deniedMint.Header.Set("Content-Type", "application/json")
+	deniedMintResp, err := ts.Client().Do(deniedMint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deniedMintResp.Body.Close()
+	if deniedMintResp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("active spark token must not mint another: %d", deniedMintResp.StatusCode)
+	}
+
+	_, isErr, text = mcpHTTPCall(t, ts, "openid_pod_put", map[string]any{
+		"path": "alice/inbox/nope.json", "body": "{}", "content_type": "application/json",
+	}, sparkTok)
+	if !isErr || !strings.Contains(text, "spark connect token cannot call") {
+		t.Fatalf("spark token must not call pod_put: %v %s", isErr, text)
+	}
+
+	regB := httptest.NewRequest(http.MethodPost, "/idp/register", strings.NewReader(
+		`{"handle":"bob","password":"testpass123","name":"Bob","createPod":true}`))
+	regB.Header.Set("Content-Type", "application/json")
+	bobRec := httptest.NewRecorder()
+	ts.Config.Handler.ServeHTTP(bobRec, regB)
+	if bobRec.Code != 200 {
+		t.Fatalf("bob register %d %s", bobRec.Code, bobRec.Body.String())
+	}
+
+	evil, _ := http.NewRequest(http.MethodPut, ts.URL+"/bob/conversations/spark/stolen.json", strings.NewReader(`{"no":true}`))
+	evil.Header.Set("Authorization", "Bearer "+sparkTok)
+	evil.Header.Set("Content-Type", "application/json")
+	evilResp, err := ts.Client().Do(evil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	evilBody, _ := io.ReadAll(evilResp.Body)
+	evilResp.Body.Close()
+	if evilResp.StatusCode != http.StatusForbidden {
+		t.Fatalf("alice spark token writing bob pod want 403, got %d %s", evilResp.StatusCode, evilBody)
+	}
+
+	revReq, _ := http.NewRequest(http.MethodDelete, ts.URL+"/idp/spark-token", nil)
+	revReq.Header.Set("Authorization", "Bearer "+aliceTok)
+	revResp, err := ts.Client().Do(revReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	revRaw, _ := io.ReadAll(revResp.Body)
+	revResp.Body.Close()
+	if revResp.StatusCode != 200 || !bytes.Contains(revRaw, []byte(`"revoked"`)) {
+		t.Fatalf("revoke %d %s", revResp.StatusCode, revRaw)
+	}
+
+	_, isErr, text = mcpHTTPCall(t, ts, "spark_save_conversation", map[string]any{
+		"title":    "after revoke",
+		"messages": []any{map[string]any{"role": "user", "text": "should fail"}},
+	}, sparkTok)
+	if !isErr || !strings.Contains(text, "revoked") {
+		t.Fatalf("after revoke want failure, got err=%v %s", isErr, text)
+	}
+
+	sparkMint, _ := http.NewRequest(http.MethodPost, ts.URL+"/idp/spark-token", strings.NewReader(`{}`))
+	sparkMint.Header.Set("Authorization", "Bearer "+sparkTok)
+	sparkMint.Header.Set("Content-Type", "application/json")
+	denied, err := ts.Client().Do(sparkMint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	denied.Body.Close()
+	if denied.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("revoked spark token minting another want 401, got %d", denied.StatusCode)
+	}
+}
+
+// TestSparkSaveLDPFallbackCatchesContainerPOSTBug stands up identity+LDP only
+// (no /conversations HTTP API). POST /conversations hits LDP and returns
+// "Can only POST to containers". spark_save_conversation must still persist
+// JSON-LD + Turtle via container PUTs.
+func TestSparkSaveLDPFallbackCatchesContainerPOSTBug(t *testing.T) {
+	dir := t.TempDir()
+	fs, err := storage.NewFileStorage(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := resourcestore.New(fs, dir)
+	tokens := authn.NewTokenService("test-secret")
+	var idp *identityapi.Service
+	ldp := &solid.LDPHandler{
+		Store:  store,
+		WAC:    wac.NewChecker(store),
+		Tokens: tokens,
+		Logger: logging.NewBasicLogger(logging.Error),
+	}
+	mux := http.NewServeMux()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mux.ServeHTTP(w, r)
+	}))
+	t.Cleanup(ts.Close)
+	idp = identityapi.New(store, tokens, ts.URL)
+	ldp.BaseURL = ts.URL
+	idp.Routes(mux)
+	mux.HandleFunc("/", ldp.ServeHTTP)
+
+	mcp := openidmcp.New(ts.URL)
+	mcp.HTTP = ts.Client()
+
+	reg := httptest.NewRequest(http.MethodPost, "/idp/register", strings.NewReader(
+		`{"handle":"ldpuser","password":"testpass123","name":"LDP","createPod":true}`))
+	reg.Header.Set("Content-Type", "application/json")
+	regRec := httptest.NewRecorder()
+	mux.ServeHTTP(regRec, reg)
+	if regRec.Code != 200 {
+		t.Fatalf("register %d %s", regRec.Code, regRec.Body.String())
+	}
+	var out map[string]any
+	if err := json.Unmarshal(regRec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	token, _ := out["token"].(string)
+	if token == "" {
+		t.Fatalf("no token: %s", regRec.Body.String())
+	}
+
+	// Prove the bug still exists on this server: POST /conversations is LDP.
+	bugReq, _ := http.NewRequest(http.MethodPost, ts.URL+"/conversations", strings.NewReader(`{"title":"x"}`))
+	bugReq.Header.Set("Authorization", "Bearer "+token)
+	bugReq.Header.Set("Content-Type", "application/json")
+	bugResp, err := ts.Client().Do(bugReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bugBody, _ := io.ReadAll(bugResp.Body)
+	bugResp.Body.Close()
+	if bugResp.StatusCode != http.StatusBadRequest || !bytes.Contains(bugBody, []byte("Can only POST to containers")) {
+		t.Fatalf("setup: expected LDP container POST bug, got %d %s", bugResp.StatusCode, bugBody)
+	}
+
+	saved := callTool(t, mcp, "spark_save_conversation", map[string]any{
+		"token": token,
+		"title": "Fallback thread",
+		"messages": []any{
+			map[string]any{"role": "user", "content": "upload this", "timestamp": "2026-01-02T03:04:05Z"},
+			map[string]any{"role": "assistant", "text": "saved via LDP"},
+		},
+	})
+	resourceURL, _ := saved["resourceUrl"].(string)
+	if resourceURL == "" || !strings.Contains(resourceURL, "/ldpuser/conversations/spark/") {
+		t.Fatalf("fallback save: %#v", saved)
+	}
+	if saved["webId"] == nil || saved["confirmation"] == nil {
+		t.Fatalf("fallback result: %#v", saved)
+	}
+
+	got, err := ts.Client().Get(resourceURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := io.ReadAll(got.Body)
+	got.Body.Close()
+	if got.StatusCode != 200 || !bytes.Contains(raw, []byte("2026-01-02T03:04:05Z")) || !bytes.Contains(raw, []byte("gemini-spark")) {
+		t.Fatalf("GET json %d %s", got.StatusCode, raw)
+	}
+	ttlURL := strings.TrimSuffix(resourceURL, ".json") + ".ttl"
+	ttlResp, err := ts.Client().Get(ttlURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ttl, _ := io.ReadAll(ttlResp.Body)
+	ttlResp.Body.Close()
+	if ttlResp.StatusCode != 200 || !bytes.Contains(ttl, []byte("dcterms:created")) {
+		t.Fatalf("GET ttl %d %s", ttlResp.StatusCode, ttl)
 	}
 }

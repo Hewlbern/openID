@@ -12,6 +12,7 @@ import (
 	"solid-go/internal/agent"
 	"solid-go/internal/audit"
 	"solid-go/internal/authn"
+	"solid-go/internal/conversations"
 	"solid-go/internal/identityapi"
 	"solid-go/internal/ipfs"
 	"solid-go/internal/logging"
@@ -114,6 +115,12 @@ func NewServer(opts *ServerOptions) *Server {
 	agents := agent.NewRegistry(rs, tokens, opts.BaseURL)
 	idp := identityapi.New(rs, tokens, opts.BaseURL)
 
+	onAudit := func(ctx context.Context, agentWebID, method, path string, body []byte) {
+		pk, _ := agents.PrivateKey(agentWebID)
+		if _, err := auditLog.Append(ctx, agentWebID, method, path, body, pk); err != nil {
+			opts.Logger.Warn("audit append failed: %v", err)
+		}
+	}
 	ldp := &solid.LDPHandler{
 		Store:   rs,
 		WAC:     wacChecker,
@@ -123,13 +130,10 @@ func NewServer(opts *ServerOptions) *Server {
 		OnNotify: func(path, activity string) {
 			hub.Publish(path, activity)
 		},
-		OnAudit: func(ctx context.Context, agentWebID, method, path string, body []byte) {
-			pk, _ := agents.PrivateKey(agentWebID)
-			if _, err := auditLog.Append(ctx, agentWebID, method, path, body, pk); err != nil {
-				opts.Logger.Warn("audit append failed: %v", err)
-			}
-		},
+		OnAudit: onAudit,
 	}
+	convos := conversations.New(rs, tokens, idp, opts.BaseURL)
+	convos.OnAudit = onAudit
 
 	site := web.New(idp, opts.BaseURL)
 
@@ -162,16 +166,20 @@ func NewServer(opts *ServerOptions) *Server {
 				"mcp":           opts.BaseURL + "/mcp",
 				"records":       opts.BaseURL + "/records",
 				"sparql":        opts.BaseURL + "/records/sparql",
+				"conversations": opts.BaseURL + "/conversations",
+				"share":         opts.BaseURL + "/share/c/",
 			},
 		})
 	})
 	mcp := openidmcp.New(opts.BaseURL)
+	mcp.Tokens = tokens
 	root.Handle("/mcp", mcp.Handler())
 	root.Handle("/mcp/", mcp.Handler())
 	idp.Routes(root)
 	agents.Routes(root)
 	auditLog.Routes(root)
 	hub.Routes(root)
+	convos.Routes(root)
 	site.Routes(root)
 	root.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/" {
@@ -354,9 +362,16 @@ func (s *Server) Bootstrap(ctx context.Context) {
 
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
+		origin := r.Header.Get("Origin")
+		if origin != "" {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Access-Control-Allow-Credentials", "true")
+			w.Header().Set("Vary", "Origin")
+		} else {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+		}
 		w.Header().Set("Access-Control-Allow-Methods", "GET, HEAD, PUT, POST, PATCH, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Authorization, DPoP, Content-Type, Link, Slug, If-Match, If-None-Match, X-Agent-WebID, X-Agent-Signature, X-Agent-Timestamp, X-Agent-Public-Key")
+		w.Header().Set("Access-Control-Allow-Headers", "Authorization, DPoP, Content-Type, Link, Slug, If-Match, If-None-Match, X-Agent-WebID, X-Agent-Signature, X-Agent-Timestamp, X-Agent-Public-Key, Cookie")
 		w.Header().Set("Access-Control-Expose-Headers", "Location, ETag, Link, WAC-Allow, Accept-Patch")
 		if r.Method == http.MethodOptions && (strings.HasPrefix(r.URL.Path, "/idp") ||
 			strings.HasPrefix(r.URL.Path, "/agents") ||
@@ -371,6 +386,8 @@ func corsMiddleware(next http.Handler) http.Handler {
 			strings.HasPrefix(r.URL.Path, "/i/") ||
 			strings.HasPrefix(r.URL.Path, "/mcp") ||
 			strings.HasPrefix(r.URL.Path, "/records") ||
+			strings.HasPrefix(r.URL.Path, "/conversations") ||
+			strings.HasPrefix(r.URL.Path, "/share") ||
 			r.URL.Path == "/health" || r.URL.Path == "/api/status") {
 			w.WriteHeader(http.StatusNoContent)
 			return

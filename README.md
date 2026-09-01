@@ -58,7 +58,7 @@ curl -s http://localhost:3000/health
 # {"status":"ok"}
 ```
 
-MCP (for Grok Bot / Cursor): `http://localhost:3000/mcp` — also stdio via `go run ./cmd/mcp` with `OPENID_BASE_URL`.
+MCP (Grok Bot / Cursor / Gemini Spark): `http://localhost:3000/mcp` — also stdio via `go run ./cmd/mcp` with `OPENID_BASE_URL`.
 
 ```bash
 curl -s http://localhost:3000/mcp
@@ -76,9 +76,82 @@ curl -s -X POST http://localhost:3000/idp/register \
 # Passport UI: http://localhost:3000/app
 ```
 
+## Save and share Gemini Spark conversations
+
+The happy path is **inside Gemini Spark**. Spark is a custom MCP client of this OpenID server. You stay in the chat; Spark calls `spark_save_conversation` with the current thread. The passport **Save** dialog on `/app` is a paste fallback only. OpenID does not scrape Gemini.
+
+Writes land at `{pod}/{handle}/conversations/spark/{id}.json` (JSON-LD transcript) plus `{id}.ttl` (Conversation / Message RDF with `dcterms:created`, `dcterms:modified`, `schema:dateCreated`, per-message timestamps, `foaf`/`schema` roles, owner WebID, `source=gemini-spark`). Containers `conversations/` and `conversations/spark/` are created first (paths end with `/`). Every write is an audited LDP PUT (IPFS / OpenTimestamps).
+
+### Spark connect token
+
+Do **not** paste the forever login Bearer into Spark. On `/app` (while signed in) use the **Spark connect** panel:
+
+1. Open `https://<origin>/app` (hosted: https://identity-two-plum.vercel.app/app ).
+2. Click **Create / copy connect token**. Copy **MCP URL** (`https://<origin>/mcp`) and the token.
+3. Gemini Spark → **Settings → Custom Connected Apps / MCP** → paste URL + `Authorization: Bearer <connect token>`.
+4. In a chat say: `Save this conversation to my Solid pod.`
+5. **Revoke** invalidates every current Spark connect token for your WebID.
+
+The connect token is a distinct JWT (`aud: spark-mcp`, `scope: spark`, unique `jti`). Default lifetime is **30 days** (`SOLID_SPARK_TOKEN_TTL`, e.g. `720h`). It can only call Spark MCP tools (save / list / get / share / unshare) and read/write **your** `{handle}/conversations/` container. It cannot mint more tokens, write another pod, or call general pod tools.
+
+```
+POST /api/spark-token     # session required → { token, expires, jti, mcpUrl, webId }
+GET  /api/spark-token     # list active grants (no secret)
+DELETE /api/spark-token   # revoke all, or ?jti=
+```
+
+These routes are implemented on the Vercel passport. Railway `/idp/spark-token` is optional.
+
+Spark must call `spark_save_conversation` with `title` and `messages: [{role, content|text, timestamp?}]`. It returns `resourceUrl`, `webId`, optional `shareUrl`, and `confirmation` text to show you.
+
+MCP tools: `spark_save_conversation`, `spark_list_conversations`, `spark_get_conversation`, `spark_share_conversation`, `spark_unshare_conversation`.
+
+### Fallback: paste in `/app`
+
+If Spark is not connected, open `/app`, click **Save**, and paste a `**User:**` / `**Gemini:**` transcript or a public `g.co/gemini/share/…` link. Google does not publish a Gemini bulk export API.
+
+```bash
+# after login (same payload Spark sends)
+curl -s -X POST https://identity-two-plum.vercel.app/api/spark-conversations \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"title":"Spark","messages":[{"role":"user","text":"hi","timestamp":"2026-09-01T10:00:00Z"},{"role":"assistant","text":"hello"}]}'
+```
+
 ## Hosted deploy
 
-The Solid server is a long-lived Go process with a volume. The marketing UI can sit on Vercel and call that origin.
+The Solid server is a long-lived Go process with a volume (LDP storage). The marketing / passport UI is on Vercel. Register/login stay same-origin via `/idp` (proxied to the pod). Save, list, share, Spark connect tokens, and MCP run as **Vercel APIs** and talk to the pod with LDP — they do **not** require a Railway redeploy. Browser auth is Bearer in `localStorage` plus an HttpOnly `solid-session` cookie.
+
+| Role | URL |
+|------|-----|
+| Passport / marketing | https://identity-two-plum.vercel.app |
+| Solid pod (Railway) | https://pod-production-ebe1.up.railway.app |
+
+**Create an ID and log in (about a minute)**
+
+1. Open https://identity-two-plum.vercel.app
+2. Claim a handle + password (or **Sign in**).
+3. You land on `/app`. Your WebID is shown on the account pane (`https://pod-production-ebe1.up.railway.app/{handle}/profile/card#me`).
+4. On `/app`, **Create / copy connect token**, add `https://identity-two-plum.vercel.app/mcp` in Spark, then say **Save this conversation to my Solid pod.**
+5. Or use **Save** on `/app` as a paste fallback, then **Share**.
+6. Sign out, then sign back in with the same handle + password.
+
+**Environment**
+
+| Variable | Where | Meaning |
+|----------|--------|---------|
+| `SOLID_BASE_URL` | Railway / `cmd/server` | Must be the public pod origin (`https://pod-production-ebe1.up.railway.app`). WebIDs are minted from this. |
+| `SOLID_TOKEN_SECRET` | Railway | JWT HMAC secret. Required in production. |
+| `SOLID_STORAGE_PATH` | Railway | Persistent volume (e.g. `/data`). |
+| `OPENID_POD` | Vercel build | Pod origin the site proxies to. Defaults to the Railway URL above. |
+| `OPENID_API` | Vercel build | Leave empty so the browser stays on the Vercel origin. |
+| `OPENID_SPARK_SECRET` | Vercel | HMAC secret for 30-day Spark connect tokens. Falls back to `SOLID_TOKEN_SECRET` then a preview default. Set a real secret in production. |
+
+```bash
+# frontend (repo root or frontend/)
+OPENID_POD=https://pod-production-ebe1.up.railway.app vercel --prod
+```
+
+Passport features (save / list / share / Spark connect token / MCP) are implemented on Vercel (`/api/spark-conversations`, `/api/spark-share`, `/share/c/…`, `/api/spark-token`, `/mcp`). Railway is only the Solid volume. A Railway redeploy is optional and not required for those use cases.
 
 **Railway (pod origin)**
 
@@ -179,7 +252,12 @@ When OTS calendars are unreachable, a **pending local proof** is stored and can 
 
 | Endpoint | Purpose |
 |----------|---------|
-| `GET/POST /mcp` | MCP for Grok Bot (open, tools/list, tools/call) |
+| `GET/POST /mcp` | MCP for Grok Bot and Gemini Spark (Vercel `/api/mcp`; session Bearer or Spark token) |
+| `GET/POST /api/spark-conversations` | Save / list Spark conversations (Vercel → LDP; no Railway `/conversations`) |
+| `POST /api/spark-conversations/{id}/share` | Mint `/share/c/{token}` (public snapshot) |
+| `POST /api/spark-conversations/{id}/unshare` | Revoke share (public GET 404 afterwards) |
+| `GET /share/c/{token}` | Public read-only conversation page (logged-out) |
+| `GET/POST/DELETE /api/spark-token` | Mint / list / revoke 30-day Spark connect tokens |
 | `POST /agents` | Register AI agent (pod + WebID + keys) |
 | `GET /agents` | List agents |
 | `POST /idp/register` | Human account + pod |
@@ -249,7 +327,7 @@ Covers health, OIDC discovery, register/login, LDP CRUD, ETags/conditions, SPARQ
 BASE_URL=http://localhost:3460 ./test/functional/mcp.sh
 ```
 
-Grok Bot / Cursor load `.cursor/mcp.json` and `.mcp.json` in this repo (`url: http://127.0.0.1:4000/mcp` when the local pod is on port 4000).
+Grok Bot / Cursor load `.cursor/mcp.json` and `.mcp.json` in this repo (`url: http://127.0.0.1:4000/mcp` when the local pod is on port 4000). Gemini Spark should use `https://<origin>/mcp` with a Bearer token from `/idp/login`.
 
 ## Layout
 
@@ -266,7 +344,8 @@ internal/audit/           hash chain + Merkle batches
 internal/ipfs/            Kubo client (+ offline fallback)
 internal/ots/             OpenTimestamps client
 internal/notify/          WebSocket + SSE
-internal/openidmcp/       MCP stdio + HTTP for Grok Bot
+internal/openidmcp/       MCP stdio + HTTP for Grok Bot and Gemini Spark
+internal/conversations/   Spark save / list / share (pod + WAC)
 internal/rdf/             Turtle / SPARQL UPDATE / N3-Patch
 cmd/mcp/                  stdio MCP entrypoint
 ```

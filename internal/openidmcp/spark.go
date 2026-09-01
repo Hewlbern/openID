@@ -327,10 +327,26 @@ func (s *Server) ensureLDPContainer(token, path string) error {
 		return err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
+	switch resp.StatusCode {
+	case http.StatusOK, http.StatusCreated, http.StatusNoContent, http.StatusConflict:
+		return nil
+	}
+	// Some servers return an odd PUT status; accept if GET then finds the container.
+	getReq, err := http.NewRequest(http.MethodGet, strings.TrimRight(s.BaseURL, "/")+"/"+path, nil)
+	if err != nil {
 		return fmt.Errorf("ensure container %s -> %d", path, resp.StatusCode)
 	}
-	return nil
+	getReq.Header.Set("Authorization", "Bearer "+token)
+	getReq.Header.Set("Accept", "text/turtle, */*")
+	getResp, err := s.HTTP.Do(getReq)
+	if err != nil {
+		return fmt.Errorf("ensure container %s -> %d", path, resp.StatusCode)
+	}
+	defer getResp.Body.Close()
+	if getResp.StatusCode < 400 {
+		return nil
+	}
+	return fmt.Errorf("ensure container %s -> %d", path, resp.StatusCode)
 }
 
 func (s *Server) putLDP(token, path, ct, body string) error {

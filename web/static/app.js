@@ -139,7 +139,8 @@ function railwayHonest() {
       <strong>Railway is still on an older Solid build.</strong>
       Login stays on this preview through the same-origin <span class="mono">/idp</span> proxy.
       ${escapeHtml(bits.join(". "))}.
-      This page saves and lists via LDP at <span class="mono">${escapeHtml(sparkDir())}</span>.
+      This page saves and lists through same-origin <span class="mono">/api/spark-conversations</span>,
+      which creates <span class="mono">${escapeHtml(sparkDir())}</span> with LDP PUT BasicContainer on Railway.
       Share links and 30-day Spark connect tokens need a Railway redeploy of this branch.
       We never ask for a Google password.
     </aside>`;
@@ -479,6 +480,17 @@ function showDetail() {
   showAccount();
 }
 
+async function listViaHostedAPI() {
+  const res = await fetch("/api/spark-conversations", {
+    method: "GET",
+    headers: openidHeaders(),
+    credentials: "include",
+  });
+  if (!res.ok) return null;
+  const doc = await res.json();
+  return Array.isArray(doc) ? doc : doc.conversations || [];
+}
+
 async function listViaLDP() {
   if (!account || !account.handle) return [];
   const res = await openidFetch("/" + account.handle + "/conversations/spark/", {
@@ -509,6 +521,14 @@ async function loadConversations() {
   podCaps.conversationsError = "GET /conversations → " + res.status + (/Can only POST to containers/i.test(errText)
     ? " (Can only POST to containers)"
     : errText ? ": " + errText.slice(0, 140) : "");
+  // Vercel catch-all often 404s browser LDP to /{handle}/conversations/ — use the
+  // same-origin API that PUTs BasicContainers straight to Railway.
+  const hosted = await listViaHostedAPI();
+  if (hosted) {
+    conversations = hosted;
+    podCaps.listMode = "hosted-ldp";
+    return;
+  }
   conversations = await listViaLDP();
   podCaps.listMode = "ldp";
 }
@@ -643,9 +663,25 @@ async function ensureLDPContainer(path) {
     },
     body: "# container\n",
   });
-  if (!res.ok && res.status !== 200 && res.status !== 201 && res.status !== 204) {
-    throw new Error("container " + path + " " + res.status + " " + (await res.text()));
-  }
+  if (res.status === 200 || res.status === 201 || res.status === 204 || res.status === 409) return;
+  if (res.ok) return;
+  const got = await openidFetch(path, { headers: { Accept: "text/turtle, */*" } });
+  if (got.ok) return;
+  throw new Error("container " + path + " " + res.status + " " + (await res.text()));
+}
+
+async function saveViaHostedAPI(payload) {
+  const res = await fetch("/api/spark-conversations", {
+    method: "POST",
+    headers: openidHeaders({ "Content-Type": "application/json" }),
+    credentials: "include",
+    body: JSON.stringify(payload),
+  });
+  const text = await res.text();
+  let doc = {};
+  try { doc = JSON.parse(text); } catch (e) { doc = { error: text }; }
+  if (!res.ok) throw new Error(doc.error || text || ("save " + res.status));
+  return doc.conversation ? Object.assign({}, doc.conversation, doc) : doc;
 }
 
 function parsePasteMessages(text) {
@@ -800,11 +836,17 @@ async function submitSave(hint, payload, opts) {
     const errText = await res.text();
     if (res.status === 404 || res.status === 405 || /Can only POST to containers/i.test(errText)) {
       try {
-        saved = await saveViaLDP(payload);
-      } catch (ldpErr) {
-        hint.textContent = String(ldpErr.message || ldpErr);
-        hint.className = "hint bad";
-        return;
+        // Prefer same-origin API → Railway LDP (creates conversations/ + spark/ first).
+        // Browser PUTs through the Vercel catch-all often 404 for new pods.
+        saved = await saveViaHostedAPI(payload);
+      } catch (apiErr) {
+        try {
+          saved = await saveViaLDP(payload);
+        } catch (ldpErr) {
+          hint.textContent = String(apiErr.message || apiErr) + " / " + String(ldpErr.message || ldpErr);
+          hint.className = "hint bad";
+          return;
+        }
       }
     } else {
       hint.textContent = errText;

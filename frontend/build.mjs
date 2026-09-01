@@ -65,6 +65,8 @@ const vercel = {
     { source: "/share/c/:path*", destination: `${pod}/share/c/:path*` },
     { source: "/mcp", destination: "/api/mcp" },
     { source: "/mcp/:path*", destination: "/api/mcp" },
+    { source: "/api/spark-conversations", destination: "/api/spark-conversations" },
+    { source: "/api/import-gemini", destination: "/api/import-gemini" },
     { source: "/agents", destination: `${pod}/agents` },
     { source: "/agents/:path*", destination: `${pod}/agents/:path*` },
     { source: "/audit/:path*", destination: `${pod}/audit/:path*` },

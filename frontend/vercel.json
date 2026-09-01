@@ -19,6 +19,8 @@
     { "source": "/share/c/:path*", "destination": "https://pod-production-ebe1.up.railway.app/share/c/:path*" },
     { "source": "/mcp", "destination": "/api/mcp" },
     { "source": "/mcp/:path*", "destination": "/api/mcp" },
+    { "source": "/api/spark-conversations", "destination": "/api/spark-conversations" },
+    { "source": "/api/import-gemini", "destination": "/api/import-gemini" },
     { "source": "/agents", "destination": "https://pod-production-ebe1.up.railway.app/agents" },
     { "source": "/agents/:path*", "destination": "https://pod-production-ebe1.up.railway.app/agents/:path*" },
     { "source": "/audit/:path*", "destination": "https://pod-production-ebe1.up.railway.app/audit/:path*" },

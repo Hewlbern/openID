@@ -65,6 +65,74 @@ func registerHuman(t *testing.T, idp *identityapi.Service) (token string, who *a
 	}
 }
 
+func TestFreshUserSaveCreatesContainersAndLists(t *testing.T) {
+	svc, _, store := testService(t)
+	body := `{"handle":"freshpod","password":"testpass123","name":"Fresh","createPod":true}`
+	req := httptest.NewRequest(http.MethodPost, "/idp/register", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	mux := http.NewServeMux()
+	svc.IDP.Routes(mux)
+	svc.Routes(mux)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("register %d %s", rec.Code, rec.Body.String())
+	}
+	var out map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	tok, _ := out["token"].(string)
+	acc := out["account"].(map[string]any)
+	handle, _ := acc["handle"].(string)
+	if tok == "" || handle == "" {
+		t.Fatalf("register response %#v", out)
+	}
+	// No pre-seeded conversations/ or conversations/spark/ containers.
+	if _, err := store.Get(context.Background(), handle+"/conversations/"); err == nil {
+		t.Fatal("conversations/ must not exist before first save")
+	}
+	if _, err := store.Get(context.Background(), handle+"/conversations/spark/"); err == nil {
+		t.Fatal("conversations/spark/ must not exist before first save")
+	}
+
+	saveReq, _ := http.NewRequest(http.MethodPost, "/conversations", strings.NewReader(`{
+		"title":"First save",
+		"messages":[{"role":"user","text":"hello"},{"role":"assistant","text":"hi"}]
+	}`))
+	saveReq.Header.Set("Authorization", "Bearer "+tok)
+	saveReq.Header.Set("Content-Type", "application/json")
+	saveRec := httptest.NewRecorder()
+	mux.ServeHTTP(saveRec, saveReq)
+	if saveRec.Code != 201 {
+		t.Fatalf("save %d %s", saveRec.Code, saveRec.Body.String())
+	}
+
+	dir, err := store.Get(context.Background(), handle+"/conversations/")
+	if err != nil || !dir.IsContainer {
+		t.Fatalf("conversations/ after save: %v %#v", err, dir)
+	}
+	spark, err := store.Get(context.Background(), handle+"/conversations/spark/")
+	if err != nil || !spark.IsContainer {
+		t.Fatalf("conversations/spark/ after save: %v %#v", err, spark)
+	}
+
+	listReq, _ := http.NewRequest(http.MethodGet, "/conversations", nil)
+	listReq.Header.Set("Authorization", "Bearer "+tok)
+	listRec := httptest.NewRecorder()
+	mux.ServeHTTP(listRec, listReq)
+	if listRec.Code != 200 {
+		t.Fatalf("list %d %s", listRec.Code, listRec.Body.String())
+	}
+	var listed map[string][]Conversation
+	if err := json.Unmarshal(listRec.Body.Bytes(), &listed); err != nil {
+		t.Fatal(err)
+	}
+	if len(listed["conversations"]) != 1 {
+		t.Fatalf("want 1 conversation, got %#v", listed)
+	}
+}
+
 func TestSaveListShareACL(t *testing.T) {
 	svc, _, store := testService(t)
 	tok, act := registerHuman(t, svc.IDP)

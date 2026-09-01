@@ -138,7 +138,10 @@ async function ensureContainer(token, path) {
     },
     body: "# container\n",
   });
-  if (res.status >= 400) throw new Error("ensure container " + path + " -> " + res.status + " " + res.text);
+  if (res.status === 200 || res.status === 201 || res.status === 204 || res.status === 409) return;
+  const got = await podFetch(path, { token, headers: { Accept: "text/turtle, */*" } });
+  if (got.status < 400) return;
+  throw new Error("ensure container " + path + " -> " + res.status + " " + res.text);
 }
 
 async function accountMe(token) {

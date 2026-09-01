@@ -186,7 +186,11 @@ function showAccount() {
 
     <section class="walk-card spark-connect" id="sparkConnect">
       <h2><span class="step">4</span> Connect Gemini Spark via MCP</h2>
-      <p>In Spark: Settings → Custom Connected Apps / MCP. Paste the MCP URL and a Bearer token. Then say <strong>Save this conversation to my Solid pod.</strong> Spark calls <span class="mono">spark_save_conversation</span> and writes the thread itself.</p>
+      <p>Two ways to connect Claude or Gemini Spark:</p>
+      <ol>
+        <li><strong>In chat (no header):</strong> add the MCP URL with no Authorization. Say <strong>Save this conversation</strong> or <strong>Log into my OpenID</strong> and give handle + password. The model calls <span class="mono">spark_login</span>, then <span class="mono">spark_save_conversation</span>, then <span class="mono">spark_share_conversation</span>.</li>
+        <li><strong>Connector header:</strong> mint a 30-day token here and paste <span class="mono">Authorization: Bearer &lt;token&gt;</span> into the Claude custom connector Request headers (or Spark MCP settings).</li>
+      </ol>
       <label>MCP URL</label>
       <p class="token-box mono" id="sparkMcpUrl">${escapeHtml(mcpURL())}</p>
       <label>Session Bearer</label>
@@ -310,7 +314,7 @@ function renderSparkTokenBox(info) {
     box.textContent = "A connect token is active until " + (t.expires || "expiry") + ". The secret is only shown when you create it.";
     return;
   }
-  box.textContent = "Optional. Create a 30-day token scoped to spark_* tools (/api/spark-token), or copy the session Bearer.";
+  box.textContent = "Optional. Mint here and paste Bearer into the Claude connector — or skip this and use spark_login in chat (handle + password).";
 }
 
 async function sparkTokenFetch(path, opts) {

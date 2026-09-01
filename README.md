@@ -82,15 +82,26 @@ The happy path is **inside Gemini Spark**. Spark is a custom MCP client of this 
 
 Writes land at `{pod}/{handle}/conversations/spark/{id}.json` (JSON-LD transcript) plus `{id}.ttl` (Conversation / Message RDF with `dcterms:created`, `dcterms:modified`, `schema:dateCreated`, per-message timestamps, `foaf`/`schema` roles, owner WebID, `source=gemini-spark`). Containers `conversations/` and `conversations/spark/` are created first (paths end with `/`). Every write is an audited LDP PUT (IPFS / OpenTimestamps).
 
-### Spark connect token
+### Spark / Claude connect (two ways)
 
-Do **not** paste the forever login Bearer into Spark. On `/app` (while signed in) use the **Spark connect** panel:
+Claude and Gemini Spark can save and share conversation logs on your Solid pod. You do **not** need a pre-minted token from `/app` if you log in inside the chat.
+
+**A — Mint on `/app` and paste Bearer into the connector (optional)**
 
 1. Open `https://<origin>/app` (hosted: https://identity-two-plum.vercel.app/app ).
 2. Click **Create / copy connect token**. Copy **MCP URL** (`https://<origin>/mcp`) and the token.
-3. Gemini Spark → **Settings → Custom Connected Apps / MCP** → paste URL + `Authorization: Bearer <connect token>`.
+3. Claude custom connector or Gemini Spark → paste the MCP URL and `Authorization: Bearer <connect token>` in Request headers.
 4. In a chat say: `Save this conversation to my Solid pod.`
-5. **Revoke** invalidates every current Spark connect token for your WebID.
+
+**B — Add the MCP URL with no auth and log in in chat (recommended for Claude)**
+
+1. Add `https://<origin>/mcp` as a custom MCP connector **without** an Authorization header.
+2. In chat, say `Save this conversation` or `Log into my OpenID` and give your handle + password when asked.
+3. The model calls `spark_login` (mints a 30-day connect token), then `spark_save_conversation` with the full thread, then `spark_share_conversation` and returns a `/share/c/…` URL.
+
+`spark_login` never echoes or logs the password. You can still paste the returned token into the Claude connector as `Bearer <token>` if you want header auth later.
+
+**Revoke** on `/app` invalidates every current Spark connect token for your WebID.
 
 The connect token is a distinct JWT (`aud: spark-mcp`, `scope: spark`, unique `jti`). Default lifetime is **30 days** (`SOLID_SPARK_TOKEN_TTL`, e.g. `720h`). It can only call Spark MCP tools (save / list / get / share / unshare) and read/write **your** `{handle}/conversations/` container. It cannot mint more tokens, write another pod, or call general pod tools.
 
@@ -104,7 +115,12 @@ These routes are implemented on the Vercel passport. Railway `/idp/spark-token` 
 
 Spark must call `spark_save_conversation` with `title` and `messages: [{role, content|text, timestamp?}]`. It returns `resourceUrl`, `webId`, optional `shareUrl`, and `confirmation` text to show you.
 
-MCP tools: `spark_save_conversation`, `spark_list_conversations`, `spark_get_conversation`, `spark_share_conversation`, `spark_unshare_conversation`.
+MCP tools: `spark_login`, `spark_register`, `spark_save_conversation`, `spark_list_conversations`, `spark_get_conversation`, `spark_share_conversation`, `spark_unshare_conversation`.
+
+```bash
+# live proof against a Vercel preview (register → login → save → share → GET 200)
+MCP_URL=https://<preview>.vercel.app ./scripts/prove-spark-login.sh
+```
 
 ### Fallback: paste in `/app`
 
@@ -131,7 +147,7 @@ The Solid server is a long-lived Go process with a volume (LDP storage). The mar
 1. Open https://identity-two-plum.vercel.app
 2. Claim a handle + password (or **Sign in**).
 3. You land on `/app`. Your WebID is shown on the account pane (`https://pod-production-ebe1.up.railway.app/{handle}/profile/card#me`).
-4. On `/app`, **Create / copy connect token**, add `https://identity-two-plum.vercel.app/mcp` in Spark, then say **Save this conversation to my Solid pod.**
+4. Add `https://identity-two-plum.vercel.app/mcp` in Claude or Spark (no header required). Say **Save this conversation** and give handle + password — or mint a token on `/app` and paste `Authorization: Bearer`.
 5. Or use **Save** on `/app` as a paste fallback, then **Share**.
 6. Sign out, then sign back in with the same handle + password.
 
@@ -327,7 +343,7 @@ Covers health, OIDC discovery, register/login, LDP CRUD, ETags/conditions, SPARQ
 BASE_URL=http://localhost:3460 ./test/functional/mcp.sh
 ```
 
-Grok Bot / Cursor load `.cursor/mcp.json` and `.mcp.json` in this repo (`url: http://127.0.0.1:4000/mcp` when the local pod is on port 4000). Gemini Spark should use `https://<origin>/mcp` with a Bearer token from `/idp/login`.
+Grok Bot / Cursor load `.cursor/mcp.json` and `.mcp.json` in this repo (`url: http://127.0.0.1:4000/mcp` when the local pod is on port 4000). Claude / Gemini Spark should use `https://<origin>/mcp`. Either log in in chat with `spark_login` (handle + password) or send `Authorization: Bearer` from `/app`.
 
 ## Layout
 

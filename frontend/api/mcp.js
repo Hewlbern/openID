@@ -7,13 +7,52 @@
 const { POD, podFetch, ensureContainer, accountMe } = require("./_lib/pod");
 const { parseSparkToken, isSparkTokenShape } = require("./_lib/jwt");
 const { shareConversation, unshareConversation } = require("./_lib/share");
+const { mintSparkConnect, originFromReq } = require("./_lib/spark-mint");
 
-const SPARK_SAVE = `FIRST-CLASS tool for Gemini Spark. When the user asks to save, upload, store, or write this chat / thread / conversation to their Solid pod or OpenID, you MUST call this tool immediately with the full current conversation. Do not tell them to leave Spark or paste into /app — that UI is a fallback only. Pass title and the complete messages array as [{role, content|text, timestamp?}]. Include timezone-aware ISO-8601 timestamps on each message when Spark has them. Spark itself supplies the transcript; do not scrape Gemini. Writes conversations/spark/{id}.json (JSON-LD) plus a Turtle sidecar. Returns resourceUrl, webId, optional shareUrl, created/modified, and confirmation text to show the user.`;
+const SPARK_INSTRUCTIONS = `Claude / Gemini Spark: when the user says things like "save this conversation", "share these logs", or "log into my OpenID":
+1. If you have no token yet (no Authorization: Bearer on this connector and no prior spark_login in this chat), ask the user for their OpenID handle (or email) and password, then call spark_login. Do not send them to /app to mint a token first.
+2. Call spark_save_conversation with the full current thread (title + messages[{role,content|text,timestamp?}]) and the token from spark_login (or the existing Bearer).
+3. If they asked to share, call spark_share_conversation with the saved id + token and return the /share/c/… URL.
+Keep the existing Claude custom-connector Request header path: Authorization: Bearer <token> from /app still works and does not require spark_login.`;
+
+const SPARK_LOGIN = `Log into OpenID with handle (or email) + password inside this chat. POSTs to /idp/login, then mints a 30-day Spark connect token (same as /api/spark-token). Call this FIRST when the user wants to save/share logs and you have no token yet — ask them for handle + password; do not send them to /app. Returns {ok, handle, webId, mcpUrl, token, expires, tokenType:"Bearer", hint}. Never echo the password. On later spark_* calls pass the returned token as \`token\`, or tell the user they may paste Authorization: Bearer <token> into the Claude connector Request headers.`;
+
+const SPARK_REGISTER = `Register a new OpenID handle + password (optional name), then mint a 30-day Spark connect token. Same return shape as spark_login. Use when the user does not have an account yet. Never echo the password.`;
+
+const SPARK_SAVE = `FIRST-CLASS tool for Claude / Gemini Spark. When the user asks to save, upload, store, share, or write this chat / thread / conversation / logs to their Solid pod or OpenID, you MUST call this with the full current conversation. If you have no token yet, call spark_login first (ask for handle + password in chat) — do not tell them to leave the chat or paste into /app. Then pass title, the complete messages array as [{role, content|text, timestamp?}], and token. Include timezone-aware ISO-8601 timestamps when known. Spark/Claude supplies the transcript; do not scrape Gemini. Writes conversations/spark/{id}.json (JSON-LD) plus a Turtle sidecar. Returns resourceUrl, webId, optional shareUrl, created/modified, and confirmation text to show the user. After a successful save, if they asked to share, call spark_share_conversation and show the /share/c/… URL.`;
+
+const SPARK_SHARE = `Mint a stable /share/c/… URL for a saved conversation. Call this after spark_save_conversation when the user asked to share these logs. Pass id (from save) and token. Returns shareUrl — show that URL to the user. Default is unlisted (secret token). Set public=true for a public link.`;
 
 function sparkTools() {
-  const token = { type: "string", description: "Session Bearer from /idp/login or 30-day Spark connect token from /api/spark-token (Authorization: Bearer on /mcp)" };
+  const token = { type: "string", description: "Optional if Authorization: Bearer is already set on /mcp. After spark_login, pass the returned token here on later spark_* calls. Also accepts a 30-day Spark connect token minted on /app via /api/spark-token." };
   const id = { type: "string", description: "Conversation id returned by spark_save_conversation" };
+  const handle = { type: "string", description: "OpenID handle (or pass email instead)" };
+  const email = { type: "string", description: "Email if the account was registered with one" };
+  const password = { type: "string", description: "Account password. Never stored or echoed by this tool." };
   return [
+    {
+      name: "spark_login",
+      description: SPARK_LOGIN,
+      inputSchema: {
+        type: "object",
+        properties: { handle, email, password },
+        required: ["password"],
+      },
+    },
+    {
+      name: "spark_register",
+      description: SPARK_REGISTER,
+      inputSchema: {
+        type: "object",
+        properties: {
+          handle,
+          password,
+          name: { type: "string", description: "Optional display name" },
+          email,
+        },
+        required: ["handle", "password"],
+      },
+    },
     {
       name: "spark_save_conversation",
       description: SPARK_SAVE,
@@ -43,7 +82,7 @@ function sparkTools() {
     },
     { name: "spark_list_conversations", description: "List Spark conversations saved in the caller's pod.", inputSchema: { type: "object", properties: { token } } },
     { name: "spark_get_conversation", description: "Read one saved Spark conversation.", inputSchema: { type: "object", properties: { id, token }, required: ["id"] } },
-    { name: "spark_share_conversation", description: "Mint a /share/c/{id} URL (proxied to the pod when available).", inputSchema: { type: "object", properties: { id, public: { type: "boolean" }, token }, required: ["id"] } },
+    { name: "spark_share_conversation", description: SPARK_SHARE, inputSchema: { type: "object", properties: { id, public: { type: "boolean" }, token }, required: ["id"] } },
     { name: "spark_unshare_conversation", description: "Revoke the share link.", inputSchema: { type: "object", properties: { id, token }, required: ["id"] } },
   ];
 }
@@ -252,6 +291,55 @@ async function sparkGet(token, id) {
   return JSON.parse(got.text);
 }
 
+/** POST /idp/login or /idp/register. Never log the body (it contains a password). */
+async function idpAuth(path, body) {
+  const res = await podFetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (res.status >= 400) {
+    if (res.status === 401) throw new Error("invalid credentials");
+    if (res.status === 409) throw new Error("handle already taken");
+    throw new Error("idp " + path + " failed (" + res.status + ")");
+  }
+  try {
+    return JSON.parse(res.text);
+  } catch (e) {
+    throw new Error("idp " + path + " returned non-JSON");
+  }
+}
+
+async function sparkLogin(args, req) {
+  const handleOrEmail = String((args && (args.handle || args.email)) || "").trim();
+  const password = args && args.password != null ? String(args.password) : "";
+  if (!handleOrEmail || !password) throw new Error("handle (or email) and password are required");
+  const payload = { password };
+  if (args.handle) payload.handle = String(args.handle).trim();
+  if (args.email) payload.email = String(args.email).trim();
+  if (!payload.handle && !payload.email) {
+    if (handleOrEmail.includes("@")) payload.email = handleOrEmail;
+    else payload.handle = handleOrEmail;
+  }
+  const data = await idpAuth("/idp/login", payload);
+  const session = data && data.token;
+  if (!session) throw new Error("login did not return a session token");
+  return mintSparkConnect(session, req);
+}
+
+async function sparkRegister(args, req) {
+  const handle = String((args && args.handle) || "").trim();
+  const password = args && args.password != null ? String(args.password) : "";
+  if (!handle || !password) throw new Error("handle and password are required");
+  const payload = { handle, password, createPod: true };
+  if (args && args.name) payload.name = String(args.name);
+  if (args && args.email) payload.email = String(args.email);
+  const data = await idpAuth("/idp/register", payload);
+  const session = data && data.token;
+  if (!session) throw new Error("register did not return a session token");
+  return mintSparkConnect(session, req);
+}
+
 async function proxyPodMCP(body, auth) {
   const res = await fetch(POD + "/mcp", {
     method: "POST",
@@ -268,6 +356,10 @@ async function proxyPodMCP(body, auth) {
 
 async function callTool(name, args, token, req) {
   switch (name) {
+    case "spark_login":
+      return sparkLogin(args || {}, req);
+    case "spark_register":
+      return sparkRegister(args || {}, req);
     case "spark_save_conversation":
       return sparkSave(args || {}, token);
     case "spark_list_conversations":
@@ -278,10 +370,10 @@ async function callTool(name, args, token, req) {
     case "spark_share_conversation": {
       if (!args || !args.id) throw new Error("id is required");
       const ldp = await resolveLdpToken(token);
-      const origin = (req.headers["x-forwarded-proto"] && req.headers["x-forwarded-host"])
-        ? req.headers["x-forwarded-proto"] + "://" + req.headers["x-forwarded-host"]
-        : (req.headers.origin || "");
-      return shareConversation(ldp, args.id, origin);
+      const origin = originFromReq(req);
+      const doc = await shareConversation(ldp, args.id, origin);
+      const shareUrl = (doc && doc.share && doc.share.url) || "";
+      return { ok: true, id: args.id, shareUrl, share: doc && doc.share, conversation: doc };
     }
     case "spark_unshare_conversation": {
       if (!args || !args.id) throw new Error("id is required");
@@ -306,7 +398,13 @@ module.exports = async function handler(req, res) {
       open: true,
       mcp: "/mcp",
       pod: POD,
-      spark: { tool: "spark_save_conversation", prompt: "Save this conversation to my Solid pod." },
+      spark: {
+        tool: "spark_save_conversation",
+        login: "spark_login",
+        register: "spark_register",
+        prompt: "Save this conversation to my Solid pod.",
+        auth: "spark_login in chat (handle + password), or Authorization: Bearer from /app",
+      },
     });
     return;
   }
@@ -329,7 +427,7 @@ module.exports = async function handler(req, res) {
         protocolVersion: (body.params && body.params.protocolVersion) || "2025-03-26",
         capabilities: { tools: {} },
         serverInfo: { name: "openid", version: "1.0.0" },
-        instructions: "Gemini Spark: when the user asks to save/upload this conversation to their Solid pod or OpenID, call spark_save_conversation with the full current thread. Auth: Bearer from /idp/login.",
+        instructions: SPARK_INSTRUCTIONS,
       },
     });
     return;

@@ -27,7 +27,7 @@ function showLogin(on) {
   if (loginBtn) loginBtn.hidden = on;
   if (signupBtn) signupBtn.hidden = !on;
   const lead = document.getElementById("gateLead");
-  if (lead) lead.textContent = on ? "Your pod. One identity." : "Claim a handle. One identity.";
+  if (lead) lead.textContent = on ? "Sign in. Then take Spark into your Solid pod." : "Claim a handle. Then take Spark into your Solid pod.";
   const first = on ? field(loginForm, "handle") : document.getElementById("handle");
   if (first) first.focus();
 }

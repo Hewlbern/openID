@@ -161,6 +161,28 @@ html, body { height: 100%; }
   box-shadow: var(--shadow);
 }
 
+.rail {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: #fafafa;
+  border-right: 1px solid var(--line);
+}
+.rail-head {
+  padding: 14px 14px 8px;
+}
+.rail-head strong {
+  display: block;
+  font-size: 13px;
+  letter-spacing: -0.02em;
+}
+.rail-head small { display: block; margin-top: 4px; }
+.rail .convos {
+  flex: 1;
+  border-right: 0;
+  background: transparent;
+}
+
 .convos {
   margin: 0;
   padding: 8px;
@@ -286,8 +308,116 @@ html, body { height: 100%; }
 .share-page .chips { justify-content: flex-start; }
 .toolbar .btn { padding: 7px 14px; }
 
+.detail .chips { justify-content: flex-start; width: auto; margin-top: 0; margin-bottom: 16px; }
+
+.walk-kicker {
+  margin: 0 0 6px;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.walk-lead { margin: 0 0 22px; color: var(--copy); max-width: 42em; line-height: 1.5; }
+
+.pod-banner {
+  margin: 0 0 20px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: #fff6e8;
+  border: 1px solid #f0ddb8;
+  color: #5a4316;
+  line-height: 1.5;
+  font-size: 13px;
+}
+.pod-banner strong { display: block; margin-bottom: 4px; }
+
+.walk-card {
+  margin: 0 0 16px;
+  padding: 18px 18px 16px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: #f7f7f8;
+}
+.walk-card h2 {
+  margin: 0 0 8px;
+  font-size: 16px;
+  font-weight: 650;
+  letter-spacing: -0.03em;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.walk-card p { margin: 0 0 12px; line-height: 1.5; }
+.walk-card label {
+  display: block;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 10px 0 6px;
+}
+.walk-card .row, .spark-connect .row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 12px;
+}
+.walk-card .field { margin-bottom: 10px; }
+.walk-card .btn.ghost { text-decoration: none; display: inline-flex; align-items: center; }
+
+.step {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #111;
+  color: #fff;
+  display: inline-grid;
+  place-items: center;
+  font-size: 12px;
+  font-weight: 650;
+  flex: none;
+}
+
+.you-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0 0 12px;
+}
+.you-name { margin: 0; font-weight: 650; font-size: 18px; letter-spacing: -0.03em; }
+.face.lg { width: 44px; height: 44px; }
+.face.lg:before, .face.lg:after { top: 13px; width: 6px; height: 6px; }
+.face.lg:before { left: 11px; }
+.face.lg:after { right: 11px; }
+
+.token-box {
+  margin: 0 0 8px;
+  padding: 10px 12px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  word-break: break-all;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.dash-list { list-style: none; margin: 0; padding: 0; }
+.dash-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+}
+.dash-list li:first-child { border-top: 0; }
+.dash-list strong { display: block; }
+.dash-list small { display: block; margin-top: 3px; color: var(--muted); font-size: 12px; }
+.dash-list .empty { color: var(--muted); border: 0; padding: 4px 0; display: block; }
+.dash-list .row { margin: 0; }
+
 .spark-connect {
-  margin: 28px 0 16px;
+  margin: 0 0 16px;
   padding: 18px 18px 16px;
   border: 1px solid var(--line);
   border-radius: 16px;
@@ -308,20 +438,9 @@ html, body { height: 100%; }
   color: var(--muted);
   margin: 10px 0 6px;
 }
-.spark-connect .row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin: 0 0 12px;
-}
-.spark-connect .token-box {
-  margin: 0 0 8px;
-  padding: 10px 12px;
-  background: #fff;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  word-break: break-all;
-  font-size: 12px;
-  line-height: 1.45;
-}
 .hint.ok { color: var(--ok, #1b7a4a); }
+
+@media (max-width: 800px) {
+  .rail { border-right: 0; border-bottom: 1px solid var(--line); max-height: 40vh; }
+  .dash-list li { flex-direction: column; }
+}

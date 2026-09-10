@@ -440,6 +440,49 @@ html, body { height: 100%; }
 }
 .hint.ok { color: var(--ok, #1b7a4a); }
 
+.auth-or {
+  margin: 16px 0 10px;
+  color: var(--muted);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.google-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: min(440px, 100%);
+  min-height: 44px;
+  padding: 10px 16px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+  font-weight: 550;
+  text-decoration: none;
+  box-shadow: var(--shadow);
+}
+.google-btn:hover { border-color: #ccc; text-decoration: none; color: var(--ink); }
+.google-btn svg { width: 18px; height: 18px; flex: none; }
+
+.agent-prompt {
+  width: 100%;
+  min-height: 180px;
+  margin: 0 0 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 12px;
+  line-height: 1.45;
+  resize: vertical;
+  color: var(--ink);
+}
+.agent-dock { background: #eef4fa; }
+
 @media (max-width: 800px) {
   .rail { border-right: 0; border-bottom: 1px solid var(--line); max-height: 40vh; }
   .dash-list li { flex-direction: column; }

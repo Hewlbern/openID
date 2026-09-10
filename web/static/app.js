@@ -144,8 +144,19 @@ function showAccount() {
   $("detail").innerHTML = `
     ${railwayHonest()}
     <p class="walk-kicker">After login — one place</p>
-    <h1>Take Spark into your Solid pod</h1>
-    <p class="walk-lead">You are signed in as <strong>${escapeHtml(account.handle || "")}</strong>. Paste a Gemini thread, or let Spark push one through MCP. Saved files live at <span class="mono">${escapeHtml(sparkDir())}</span>.</p>
+    <h1>Take traces into your Solid pod</h1>
+    <p class="walk-lead">You are signed in as <strong>${escapeHtml(account.handle || "")}</strong>. Copy an Open / agent prompt for Codex or Cursor, paste a Gemini thread, or let Spark push one through MCP. Saved files live at <span class="mono">${escapeHtml(sparkDir())}</span>.</p>
+
+    <section class="walk-card agent-dock" id="agentDock">
+      <h2><span class="step">0</span> Open / agent prompt</h2>
+      <p>Paste this into Codex, Cursor, Claude, or Grok. Copy remints a short-lived Bearer so the agent can save traces to <span class="mono">${escapeHtml(sparkDir())}</span> via MCP or REST. On 401, copy again.</p>
+      <textarea id="agentPromptBox" class="agent-prompt" readonly rows="10" spellcheck="false"></textarea>
+      <div class="row">
+        <button type="button" class="btn" id="copyAgentPromptBtn">Copy agent prompt</button>
+        <button type="button" class="btn ghost" id="loadAgentPromptBtn">Show instructions</button>
+      </div>
+      <p class="hint" id="agentPromptHint"></p>
+    </section>
 
     <section class="walk-card" id="youCard">
       <h2><span class="step">1</span> Who you are</h2>
@@ -186,7 +197,7 @@ function showAccount() {
 
     <section class="walk-card spark-connect" id="sparkConnect">
       <h2><span class="step">4</span> Connect Gemini Spark via MCP</h2>
-      <p>In Spark: Settings → Custom Connected Apps / MCP. Paste the MCP URL and a Bearer token. Then say <strong>Save this conversation to my Solid pod.</strong> Spark calls <span class="mono">spark_save_conversation</span> and writes the thread itself.</p>
+      <p>Standing Gemini Spark connection (30-day token). For Codex / Cursor, prefer the Open / agent prompt above — it remints a short-lived Bearer. In Spark: Settings → Custom Connected Apps / MCP. Then say <strong>Save this conversation to my Solid pod.</strong></p>
       <label>MCP URL</label>
       <p class="token-box mono" id="sparkMcpUrl">${escapeHtml(mcpURL())}</p>
       <label>Session Bearer</label>
@@ -203,6 +214,7 @@ function showAccount() {
       <p class="hint" id="sparkConnectHint"></p>
     </section>`;
   bindYouCard();
+  bindAgentDock();
   bindImportForm();
   renderDashList();
   bindSparkConnect();
@@ -224,6 +236,57 @@ async function copyText(value) {
   } catch (e) {
     return false;
   }
+}
+
+function setAgentHint(text, ok) {
+  setHint("agentPromptHint", text, ok);
+}
+
+async function loadPublicAgentPrompt() {
+  const box = $("agentPromptBox");
+  try {
+    const res = await fetch("/api/agent/prompt", { headers: { Accept: "application/json" } });
+    const doc = await res.json().catch(() => ({}));
+    if (box && doc.prompt) box.value = doc.prompt;
+    return doc.prompt || "";
+  } catch (e) {
+    return "";
+  }
+}
+
+async function mintAndCopyAgentPrompt() {
+  setAgentHint("Minting a short-lived agent token…");
+  const res = await openidFetch("/api/agent/session", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: "{}",
+  });
+  const text = await res.text();
+  let doc = {};
+  try { doc = JSON.parse(text); } catch (e) { doc = { error: text }; }
+  if (!res.ok) {
+    setAgentHint(doc.error || text || "Could not mint agent session.", false);
+    setStatus(doc.error || "Agent prompt mint failed", false);
+    return "";
+  }
+  const box = $("agentPromptBox");
+  if (box && doc.prompt) box.value = doc.prompt;
+  const copied = await copyText(doc.prompt || "");
+  const until = doc.expiresAt ? (" Expires " + doc.expiresAt + ".") : "";
+  setAgentHint((copied ? "Copied. " : "Minted. Select the prompt to copy. ") + "Paste into Codex or Cursor." + until, true);
+  setStatus(copied ? "Copied agent prompt" : "Agent prompt ready", true);
+  return doc.prompt || "";
+}
+
+function bindAgentDock() {
+  const copy = $("copyAgentPromptBtn");
+  const load = $("loadAgentPromptBtn");
+  if (copy) copy.addEventListener("click", () => mintAndCopyAgentPrompt());
+  if (load) load.addEventListener("click", async () => {
+    const prompt = await loadPublicAgentPrompt();
+    setAgentHint(prompt ? "Instructions only — no token. Copy remints a Bearer." : "Could not load /api/agent/prompt.", !!prompt);
+  });
+  loadPublicAgentPrompt();
 }
 
 function bindYouCard() {
@@ -633,6 +696,16 @@ $("logout").addEventListener("click", async () => {
 $("q").addEventListener("input", renderList);
 $("meFace").addEventListener("click", goYou);
 $("youBtn").addEventListener("click", goYou);
+
+const copyPromptBtn = $("copyPromptBtn");
+if (copyPromptBtn) {
+  copyPromptBtn.addEventListener("click", async () => {
+    goYou();
+    await mintAndCopyAgentPrompt();
+    const dock = $("agentDock");
+    if (dock) dock.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
+}
 
 const saveModal = $("saveModal");
 $("saveBtn").addEventListener("click", () => {

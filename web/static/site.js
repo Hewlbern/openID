@@ -133,6 +133,16 @@ loginForm.addEventListener("submit", async (e) => {
   location.href = "/app";
 });
 
+const params = new URLSearchParams(location.search);
+const googleErr = params.get("google_error");
+if (googleErr) {
+  const status = document.getElementById("claimStatus");
+  if (status) {
+    status.className = "status bad";
+    status.textContent = googleErr;
+  }
+}
+
 const apiStatus = document.getElementById("apiStatus");
 if (apiStatus) {
   openidFetch("/health").then((r) => {

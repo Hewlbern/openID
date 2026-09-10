@@ -378,6 +378,8 @@ $("composer").addEventListener("submit", async (e) => {
 
 (async function boot() {
   if (window.__TAURI_INTERNALS__) document.body.classList.add("tauri");
+  const googleErr = new URLSearchParams(location.search).get("google_error");
+  if (googleErr) setMsg("loginMsg", googleErr, "bad");
   await loadStatus();
   await loadSession();
 })();

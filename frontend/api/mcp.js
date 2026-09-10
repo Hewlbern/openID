@@ -6,6 +6,7 @@
  */
 const { POD, podFetch, ensureContainer, accountMe } = require("./_lib/pod");
 const { parseSparkToken, isSparkTokenShape } = require("./_lib/jwt");
+const { sanitizeSource } = require("./_lib/agent-prompt");
 const { shareConversation, unshareConversation } = require("./_lib/share");
 
 const SPARK_SAVE = `FIRST-CLASS tool for Gemini Spark. When the user asks to save, upload, store, or write this chat / thread / conversation to their Solid pod or OpenID, you MUST call this tool immediately with the full current conversation. Do not tell them to leave Spark or paste into /app — that UI is a fallback only. Pass title and the complete messages array as [{role, content|text, timestamp?}]. Include timezone-aware ISO-8601 timestamps on each message when Spark has them. Spark itself supplies the transcript; do not scrape Gemini. Writes conversations/spark/{id}.json (JSON-LD) plus a Turtle sidecar. Returns resourceUrl, webId, optional shareUrl, created/modified, and confirmation text to show the user.`;
@@ -36,6 +37,7 @@ function sparkTools() {
             },
           },
           source_url: { type: "string" },
+          source: { type: "string", description: "Trace origin: codex, cursor, claude, grok, gemini-spark" },
           text: { type: "string" },
           token,
         },
@@ -106,7 +108,8 @@ function normalizeMessages(inMsgs) {
   return out;
 }
 
-function turtle(resourceUrl, title, id, webId, now, msgs) {
+function turtle(resourceUrl, title, id, webId, now, msgs, source) {
+  const src = sanitizeSource(source);
   let ttl = `@prefix schema: <https://schema.org/> .
 @prefix dcterms: <http://purl.org/dc/terms/> .
 @prefix foaf: <http://xmlns.com/foaf/0.1/> .
@@ -119,14 +122,14 @@ function turtle(resourceUrl, title, id, webId, now, msgs) {
   dcterms:modified ${JSON.stringify(now)}^^xsd:dateTime ;
   schema:dateCreated ${JSON.stringify(now)}^^xsd:dateTime ;
   schema:dateModified ${JSON.stringify(now)}^^xsd:dateTime ;
-  dcterms:source "gemini-spark"`;
+  dcterms:source ${JSON.stringify(src)}`;
   if (webId) ttl += ` ;\n  schema:creator <${webId}> ;\n  foaf:maker <${webId}>`;
   msgs.forEach((_, i) => { ttl += ` ;\n  schema:hasPart <${resourceUrl}#msg-${i + 1}>`; });
   ttl += " .\n";
   msgs.forEach((m, i) => {
     ttl += `\n<${resourceUrl}#msg-${i + 1}> a schema:Message ;\n  schema:text ${JSON.stringify(m.text)} ;\n  schema:author ${JSON.stringify(m.role)}`;
     if (m.timestamp) ttl += ` ;\n  schema:dateCreated ${JSON.stringify(m.timestamp)}^^xsd:dateTime ;\n  dcterms:created ${JSON.stringify(m.timestamp)}^^xsd:dateTime`;
-    if (m.role === "assistant") ttl += ` ;\n  foaf:Agent "gemini-spark"`;
+    if (m.role === "assistant") ttl += ` ;\n  foaf:Agent ${JSON.stringify(src)}`;
     else if (webId) ttl += ` ;\n  foaf:maker <${webId}>`;
     ttl += " .\n";
   });
@@ -165,7 +168,7 @@ async function sparkSave(args, token) {
     id,
     title,
     name: title,
-    source: "gemini-spark",
+    source: sanitizeSource(args.source),
     sourceUrl: args.source_url || "",
     created: now,
     updated: now,
@@ -189,7 +192,7 @@ async function sparkSave(args, token) {
     method: "PUT",
     token,
     headers: { "Content-Type": "text/turtle" },
-    body: turtle(resourceUrl, title, id, acc.webId, now, messages),
+    body: turtle(resourceUrl, title, id, acc.webId, now, messages, args.source),
   });
   if (putTtl.status >= 400) throw new Error("PUT ttl " + putTtl.status + " " + putTtl.text);
   return {
@@ -200,11 +203,11 @@ async function sparkSave(args, token) {
     metaTtlUrl: POD + ttlPath,
     webId: acc.webId,
     pod: POD + "/" + handle + "/",
-    source: "gemini-spark",
+    source: sanitizeSource(args.source),
     created: now,
     modified: now,
     messageCount: messages.length,
-    confirmation: `Saved “${title}” to your Solid pod as ${resourceUrl} (${messages.length} messages, source=gemini-spark). WebID ${acc.webId}. Created ${now}.`,
+    confirmation: `Saved “${title}” to your Solid pod as ${resourceUrl} (${messages.length} messages, source=${sanitizeSource(args.source)}). WebID ${acc.webId}. Created ${now}.`,
     conversation: doc,
   };
 }
@@ -329,7 +332,7 @@ module.exports = async function handler(req, res) {
         protocolVersion: (body.params && body.params.protocolVersion) || "2025-03-26",
         capabilities: { tools: {} },
         serverInfo: { name: "openid", version: "1.0.0" },
-        instructions: "Gemini Spark: when the user asks to save/upload this conversation to their Solid pod or OpenID, call spark_save_conversation with the full current thread. Auth: Bearer from /idp/login.",
+        instructions: "When the user asks to save/upload this conversation to their Solid pod or OpenID, call spark_save_conversation with the full current thread and source (codex|cursor|claude|grok|gemini-spark). Auth: Bearer from a copied OpenID / agent prompt or /idp/login.",
       },
     });
     return;

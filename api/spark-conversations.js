@@ -3,6 +3,9 @@
  * Vercel catch-all rewrite 404s browser LDP PUTs to /{handle}/conversations/.
  * Talks to the Railway Solid pod directly (PUT BasicContainer, then PUT .json/.ttl).
  */
+const { resolveSessionToken } = require("./_lib/jwt");
+const { sanitizeSource } = require("./_lib/agent-prompt");
+
 const POD = (process.env.OPENID_POD || process.env.OPENID_API || "https://pod-production-ebe1.up.railway.app").replace(/\/$/, "");
 
 function cors(res) {
@@ -95,7 +98,8 @@ function normalizeMessages(inMsgs, text) {
   }).filter((m) => m.text);
 }
 
-function turtle(resourceUrl, title, id, webId, now, msgs) {
+function turtle(resourceUrl, title, id, webId, now, msgs, source) {
+  const src = sanitizeSource(source);
   let ttl = `@prefix schema: <https://schema.org/> .
 @prefix dcterms: <http://purl.org/dc/terms/> .
 @prefix foaf: <http://xmlns.com/foaf/0.1/> .
@@ -108,14 +112,14 @@ function turtle(resourceUrl, title, id, webId, now, msgs) {
   dcterms:modified ${JSON.stringify(now)}^^xsd:dateTime ;
   schema:dateCreated ${JSON.stringify(now)}^^xsd:dateTime ;
   schema:dateModified ${JSON.stringify(now)}^^xsd:dateTime ;
-  dcterms:source "gemini-spark"`;
+  dcterms:source ${JSON.stringify(src)}`;
   if (webId) ttl += ` ;\n  schema:creator <${webId}> ;\n  foaf:maker <${webId}>`;
   (msgs || []).forEach((_, i) => { ttl += ` ;\n  schema:hasPart <${resourceUrl}#msg-${i + 1}>`; });
   ttl += " .\n";
   (msgs || []).forEach((m, i) => {
     ttl += `\n<${resourceUrl}#msg-${i + 1}> a schema:Message ;\n  schema:text ${JSON.stringify(m.text)} ;\n  schema:author ${JSON.stringify(m.role)}`;
     if (m.timestamp) ttl += ` ;\n  schema:dateCreated ${JSON.stringify(m.timestamp)}^^xsd:dateTime ;\n  dcterms:created ${JSON.stringify(m.timestamp)}^^xsd:dateTime`;
-    if (m.role === "assistant") ttl += ` ;\n  foaf:Agent "gemini-spark"`;
+    if (m.role === "assistant") ttl += ` ;\n  foaf:Agent ${JSON.stringify(src)}`;
     else if (webId) ttl += ` ;\n  foaf:maker <${webId}>`;
     ttl += " .\n";
   });
@@ -151,7 +155,7 @@ async function save(token, body, origin) {
     id,
     title,
     name: title,
-    source: "gemini-spark",
+    source: sanitizeSource(body.source),
     sourceUrl: body.source_url || "",
     created: now,
     updated: now,
@@ -177,7 +181,7 @@ async function save(token, body, origin) {
     method: "PUT",
     token,
     headers: { "Content-Type": "text/turtle" },
-    body: turtle(resourceUrl, title, id, acc.webId, now, messages),
+    body: turtle(resourceUrl, title, id, acc.webId, now, messages, body.source),
   });
   if (putTtl.status >= 400) throw new Error("PUT ttl " + putTtl.status + " " + putTtl.text);
 
@@ -215,12 +219,13 @@ module.exports = async function handler(req, res) {
     res.status(204).end();
     return;
   }
-  const token = bearer(req);
+  let token = bearer(req);
   if (!token) {
     res.status(401).json({ error: "Authorization: Bearer required" });
     return;
   }
   try {
+    token = resolveSessionToken(token);
     if (req.method === "GET") {
       const doc = await list(token);
       res.status(200).json(doc);

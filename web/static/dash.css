@@ -144,6 +144,32 @@ body:not(.in) .face { background: #111; }
 .auth-msg { min-height: 18px; margin: 0; font-size: 13px; color: var(--copy); }
 .auth-msg.bad { color: var(--bad); }
 .auth-msg.ok { color: var(--ok); }
+.auth-or {
+  margin: 8px 16px 10px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.google-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin: 0 16px;
+  min-height: 44px;
+  padding: 10px 16px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+  font-weight: 550;
+  text-decoration: none;
+}
+.google-btn:hover { border-color: #ccc; text-decoration: none; color: var(--ink); }
+.google-btn svg { width: 18px; height: 18px; flex: none; }
 .work { width: min(720px, 100%); }
 
 .stream {

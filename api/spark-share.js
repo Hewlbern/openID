@@ -2,6 +2,7 @@
  * Authenticated share / revoke via public LDP snapshots (no Railway /conversations).
  */
 const { bearer, requestOrigin } = require("./_lib/pod");
+const { resolveSessionToken } = require("./_lib/jwt");
 const { shareConversation, unshareConversation } = require("./_lib/share");
 
 function cors(res) {
@@ -20,9 +21,15 @@ module.exports = async function handler(req, res) {
     res.status(405).json({ error: "POST only" });
     return;
   }
-  const token = bearer(req);
+  let token = bearer(req);
   if (!token) {
     res.status(401).json({ error: "Authorization: Bearer required" });
+    return;
+  }
+  try {
+    token = resolveSessionToken(token);
+  } catch (e) {
+    res.status(401).json({ error: String(e.message || e) });
     return;
   }
   const body = typeof req.body === "string" ? JSON.parse(req.body || "{}") : (req.body || {});

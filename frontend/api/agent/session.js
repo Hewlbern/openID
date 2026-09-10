@@ -3,7 +3,8 @@
  * Remints on each call (same manner as megabot POST /api/agent/session).
  */
 const { accountMe, bearer, requestOrigin, ensureContainer, podFetch } = require("../_lib/pod");
-const { issueAgentToken, parseSparkToken, AUD, SCOPE } = require("../_lib/jwt");
+const { parseSparkToken, AUD, SCOPE } = require("../_lib/jwt");
+const { issueAgentSession } = require("../_lib/agent-token");
 const { publicOrigin, buildAgentPrompt } = require("../_lib/agent-prompt");
 
 function cors(res) {
@@ -59,27 +60,34 @@ module.exports = async function handler(req, res) {
   try {
     const acc = await accountMe(session);
     const origin = publicOrigin(req) || requestOrigin(req);
-    const minted = issueAgentToken({
+    const minted = issueAgentSession({
       webId: acc.webId,
       handle: acc.handle,
       sessionToken: session,
     });
-    const file = await loadJSON(session, grantsPath(acc.handle), { grants: [] });
-    file.grants = file.grants || [];
-    file.grants.push({
-      jti: minted.jti,
-      webId: acc.webId,
-      issued: new Date().toISOString(),
-      expires: minted.expires,
-      revoked: false,
-      kind: "agent",
+    if (minted.jti) {
+      const file = await loadJSON(session, grantsPath(acc.handle), { grants: [] });
+      file.grants = file.grants || [];
+      file.grants.push({
+        jti: minted.jti,
+        webId: acc.webId,
+        issued: new Date().toISOString(),
+        expires: minted.expires,
+        revoked: false,
+        kind: "agent",
+      });
+      await saveJSON(session, acc.handle, grantsPath(acc.handle), file);
+    }
+    const prompt = buildAgentPrompt({
+      origin,
+      token: minted.token,
+      expiresAt: minted.expiresAt || minted.expires,
+      tokenKind: minted.tokenKind,
     });
-    await saveJSON(session, acc.handle, grantsPath(acc.handle), file);
-    const prompt = buildAgentPrompt({ origin, token: minted.token });
     res.status(200).json({
       prompt,
       token: minted.token,
-      expiresAt: minted.expires,
+      expiresAt: minted.expiresAt || minted.expires,
       tokenKind: minted.tokenKind || "spark-mcp",
       tokenType: "Bearer",
       jti: minted.jti,

@@ -15,14 +15,26 @@ function publicOrigin(req) {
   return "https://askclaw.xyz";
 }
 
+function keepLine(expiresAt, tokenKind) {
+  if (expiresAt) {
+    const kind = tokenKind === "access_token"
+      ? "This is the signed-in session access token (not a service role)."
+      : "This is a user-scoped OpenID agent token (aud=spark-mcp, not a service role).";
+    return "Keep this token private (expires " + expiresAt + "). " + kind + " On HTTP 401, ask me to copy a new OpenID / agent prompt.";
+  }
+  return "Keep this token private (short-lived). On HTTP 401, ask me to copy a new OpenID / agent prompt.";
+}
+
 function sanitizeSource(raw) {
   const s = String(raw || "").toLowerCase().replace(/[^a-z0-9-]/g, "").slice(0, 40);
   return s || "gemini-spark";
 }
 
-function buildAgentPrompt({ origin, token } = {}) {
+const TOKEN_PLACEHOLDER = "<TOKEN>";
+
+function buildAgentPrompt({ origin, token, expiresAt, tokenKind } = {}) {
   const base = String(origin || "https://askclaw.xyz").replace(/\/$/, "");
-  const bearer = token ? String(token) : "";
+  const bearer = token ? String(token) : TOKEN_PLACEHOLDER;
   return [
     "Help me save conversation traces to my OpenID Solid pod. If it is unclear what I want, ask me before you write or share.",
     "",
@@ -37,7 +49,7 @@ function buildAgentPrompt({ origin, token } = {}) {
     "## Auth",
     "Send this header on user-scoped MCP and conversation APIs:",
     "Authorization: Bearer " + bearer,
-    "Keep this token private (short-lived, aud=spark-mcp). On HTTP 401, ask me to copy a new OpenID / agent prompt.",
+    keepLine(expiresAt, tokenKind),
     "Never invent credentials, WebIDs, client secrets, or tokens.",
     "",
     "## Read",
@@ -85,7 +97,7 @@ Canonical Streamable HTTP endpoint:
 - ${base}/mcp
 - Alias: ${base}/api/mcp
 
-CORS: \`*\`. Auth: \`Authorization: Bearer <token>\` from a copied OpenID / agent prompt (\`POST /api/agent/session\`) or a 30-day Spark connect token (\`POST /api/spark-token\`).
+CORS: \`*\`. Auth: \`Authorization: Bearer <TOKEN>\` from a copied OpenID / agent prompt (\`POST /api/agent/session\`) or a 30-day Spark connect token (\`POST /api/spark-token\`).
 
 ### Tools
 - \`spark_save_conversation\` — write the current thread to the caller's pod. Args: title, messages [{role, content|text, timestamp?}], optional source / source_url / text.
@@ -102,14 +114,14 @@ A Spark connect token (\`aud: spark-mcp\`, \`scope: spark\`) can only call these
 Current copyable agent instructions. No token is minted. CORS \`*\`.
 
 ### POST /api/agent/session
-Signed-in browser only (session Bearer or \`solid-session\` cookie). Returns \`{ prompt, token, expiresAt, tokenKind }\`. Token is user-scoped and short-lived (default 2 hours, \`OPENID_AGENT_TOKEN_TTL\` seconds). Same JWT machinery as Spark connect tokens (\`aud=spark-mcp\`) with an embedded session grant so hosted MCP can write LDP. Never a service-role key. The /app copy dock remints on each copy.
+Signed-in browser only (session Bearer or \`solid-session\` cookie). Returns \`{ prompt, token, expiresAt, tokenKind }\`. Dedicated agent JWT (~30m) when \`AGENT_JWT_SECRET\` (or \`OPENID_SPARK_SECRET\`) is set; otherwise the session access token. Never a service-role key. The yellow PROMPT dock remints on each copy.
 
 ### GET /llms.txt
 This document.
 
 ## Conversation APIs (owner-only, CORS *)
 
-Send \`Authorization: Bearer <token>\` from a copied OpenID prompt, or use the signed-in cookie / session Bearer.
+Send \`Authorization: Bearer <TOKEN>\` from a copied OpenID prompt, or use the signed-in cookie / session Bearer.
 
 - \`GET /api/spark-conversations\` — list saved traces
 - \`POST /api/spark-conversations\` — create from \`{ title?, messages?, text?, source?, source_url? }\`
@@ -131,7 +143,7 @@ Prefer the short-lived agent session for Codex / Cursor. Use the 30-day Spark to
 
 - \`POST /idp/register\` — handle + password (creates WebID + pod)
 - \`POST /idp/login\` — handle or email + password
-- \`GET /api/auth/google\` — Continue with Google (Vercel OAuth; lands on /app)
+- \`GET /api/auth/google\` — Continue with Google (start; lands on /app via \`/auth/callback\`)
 - \`POST /idp/google\` — pod-side Google ID token exchange (Railway)
 - \`GET /idp/accounts/me\` — current account
 
@@ -155,8 +167,10 @@ Prefer the short-lived agent session for Codex / Cursor. Use the 30-day Spark to
 }
 
 module.exports = {
+  TOKEN_PLACEHOLDER,
   publicOrigin,
   sanitizeSource,
   buildAgentPrompt,
   buildLlmsTxt,
+  keepLine,
 };

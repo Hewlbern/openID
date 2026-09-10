@@ -108,11 +108,11 @@ Same manner as a hosted copy-dock: the human signs in on `/app`, copies a prompt
 
 ```
 GET  /llms.txt              # docs; CORS *
-GET  /api/agent/prompt      # { prompt } — no token minted
+GET  /api/agent/prompt      # { prompt, docs, mint, auth } — Bearer <TOKEN>; does not mint
 POST /api/agent/session     # signed-in browser only → { prompt, token, expiresAt, tokenKind }
 ```
 
-`tokenKind` is `spark-mcp`: a short-lived (default 2 hours) user-scoped JWT minted with the existing Spark connect machinery (embedded session grant so hosted `/mcp` can write LDP). Each copy remints. On HTTP 401 the agent must ask the human to copy a fresh prompt.
+Public GET uses `Authorization: Bearer <TOKEN>` and never mints. Signed-in POST remints: a dedicated ~30 minute user-scoped JWT when `AGENT_JWT_SECRET` (or an existing Spark/Solid HMAC) is set; otherwise it embeds the session access token. Never a service-role key. The yellow **PROMPT** chip on `/` and `/app` copies the brief — signed-out Copy opens sign-in and does not mint; signed-in Copy remints. On HTTP 401 the agent must ask the human to copy a fresh prompt. Auth header for private APIs: `Authorization: Bearer <TOKEN>`.
 
 An agent that received a copied prompt should:
 
@@ -151,7 +151,7 @@ The Solid server is a long-lived Go process with a volume (LDP storage). The mar
 1. Open https://askclaw.xyz
 2. Claim a handle + password, **Sign in**, or **Continue with Google**.
 3. You land on `/app`. Your WebID is shown on the account pane (`https://pod-production-ebe1.up.railway.app/{handle}/profile/card#me`).
-4. On `/app`, **Copy agent prompt** and paste it into Codex / Cursor / Claude / Grok. The agent uses MCP (`https://askclaw.xyz/mcp`) to write traces to `{handle}/conversations/spark/`.
+4. On `/app`, use the yellow **PROMPT** chip (or **Copy agent prompt**) and paste it into Codex / Cursor / Claude / Grok. The agent uses MCP (`https://askclaw.xyz/mcp`) to write traces to `{handle}/conversations/spark/`.
 5. For a standing Gemini Spark connection, **Create / copy connect token**, add `https://askclaw.xyz/mcp`, then say **Save this conversation to my Solid pod.**
 6. Or use **Save** on `/app` as a paste fallback, then **Share**.
 7. Sign out, then sign back in with the same handle + password (or Google).
@@ -165,12 +165,13 @@ The Solid server is a long-lived Go process with a volume (LDP storage). The mar
 | `SOLID_STORAGE_PATH` | Railway | Persistent volume (e.g. `/data`). |
 | `OPENID_POD` | Vercel build | Pod origin the site proxies to. Defaults to the Railway URL above. |
 | `OPENID_API` | Vercel build | Leave empty so the browser stays on the Vercel origin. |
-| `OPENID_SPARK_SECRET` | Vercel | HMAC secret for 30-day Spark connect tokens and short-lived agent JWTs. Falls back to `SOLID_TOKEN_SECRET` then a preview default. Set a real secret in production. |
+| `OPENID_SPARK_SECRET` | Vercel | HMAC secret for 30-day Spark connect tokens. Falls back to `SOLID_TOKEN_SECRET` then a preview default. Set a real secret in production. |
+| `AGENT_JWT_SECRET` | Vercel / Railway | Optional dedicated HMAC for ~30m agent session JWTs. If unset, `POST /api/agent/session` embeds the signed-in session access token (or signs with the Spark/Solid secret when that is set). Never a service-role key. |
 | `OPENID_PUBLIC_URL` | Vercel | Public passport origin baked into `/llms.txt` and agent prompts. Defaults to the request host (`https://askclaw.xyz`). |
-| `OPENID_AGENT_TOKEN_TTL` | Vercel | Agent session lifetime in seconds (default `7200`). |
+| `OPENID_AGENT_TOKEN_TTL` | Vercel / Railway | Agent session lifetime in seconds (default `1800`). |
 | `GOOGLE_CLIENT_ID` | Vercel + Railway | New Web OAuth client for askclaw (dreammachina GCP). Do **not** reuse megabot’s Supabase client. |
 | `GOOGLE_CLIENT_SECRET` | Vercel | OAuth client secret. Never commit it. |
-| `GOOGLE_REDIRECT_URI` | Vercel | Optional override. Default: `{origin}/api/auth/google/callback`. |
+| `GOOGLE_REDIRECT_URI` | Vercel | Optional override. Default: `{origin}/auth/callback`. |
 
 ```bash
 # frontend (repo root or frontend/)
@@ -187,9 +188,9 @@ Passport features (save / list / share / Spark connect token / MCP / agent promp
    - `https://identity-two-plum.vercel.app`
    - `http://localhost:3000`
 3. Authorized redirect URIs:
-   - `https://askclaw.xyz/api/auth/google/callback`
-   - `https://identity-two-plum.vercel.app/api/auth/google/callback`
-   - `http://localhost:3000/api/auth/google/callback`
+   - `https://askclaw.xyz/auth/callback`
+   - `https://identity-two-plum.vercel.app/auth/callback`
+   - `http://localhost:3000/auth/callback`
 4. Vercel project `identity` (hewlberns-projects): `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`.
 5. Railway pod: `GOOGLE_CLIENT_ID` (same client) so `POST /idp/google` can check the ID token audience.
 6. Leave megabot’s existing Supabase callback (`https://lrmgqtumhzvtbdvfqxiw.supabase.co/auth/v1/callback`) untouched.
@@ -295,9 +296,9 @@ When OTS calendars are unreachable, a **pending local proof** is stored and can 
 |----------|---------|
 | `GET /llms.txt` | Agent-facing docs (MCP, auth, save/list/share, recipe) |
 | `GET /api/agent/prompt` | Copyable instructions; no token minted; CORS `*` |
-| `POST /api/agent/session` | Signed-in mint `{ prompt, token, expiresAt, tokenKind }` (short-lived `spark-mcp` JWT) |
-| `GET /api/auth/google` | Start Google OAuth (Vercel) |
-| `GET /api/auth/google/callback` | Google OAuth callback → session on `/app` |
+| `POST /api/agent/session` | Signed-in mint `{ prompt, token, expiresAt, tokenKind }` (~30m JWT or session access token) |
+| `GET /api/auth/google` | Start Google OAuth (Vercel; alias `GET /auth/google`) |
+| `GET /auth/callback` | Google OAuth callback → session on `/app` (alias `/api/auth/google/callback`) |
 | `POST /idp/google` | Pod-side Google ID token → WebID session |
 | `GET/POST /mcp` | MCP for Grok Bot, Codex/Cursor, and Gemini Spark (Vercel `/api/mcp`; session Bearer or Spark/agent token) |
 | `GET/POST /api/spark-conversations` | Save / list Spark conversations (Vercel → LDP; no Railway `/conversations`) |

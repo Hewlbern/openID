@@ -28,7 +28,7 @@ function requestOrigin(req) {
 function callbackURL(req) {
   const explicit = (process.env.GOOGLE_REDIRECT_URI || "").replace(/\/$/, "");
   if (explicit) return explicit;
-  return requestOrigin(req) + "/api/auth/google/callback";
+  return requestOrigin(req) + "/auth/callback";
 }
 
 function randomState() {
@@ -156,7 +156,7 @@ function setupHTML() {
 <ol>
 <li>APIs &amp; Services → Credentials → Create credentials → OAuth client ID → Web application.</li>
 <li>Authorized JavaScript origins: <code>https://askclaw.xyz</code>, <code>https://identity-two-plum.vercel.app</code>, <code>http://localhost:3000</code>.</li>
-<li>Authorized redirect URIs: <code>https://askclaw.xyz/api/auth/google/callback</code>, <code>https://identity-two-plum.vercel.app/api/auth/google/callback</code>, <code>http://localhost:3000/api/auth/google/callback</code>.</li>
+<li>Authorized redirect URIs: <code>https://askclaw.xyz/auth/callback</code>, <code>https://identity-two-plum.vercel.app/auth/callback</code>, <code>http://localhost:3000/auth/callback</code>.</li>
 <li>Vercel project <code>identity</code> (hewlberns-projects): set <code>GOOGLE_CLIENT_ID</code> and <code>GOOGLE_CLIENT_SECRET</code>.</li>
 <li>Railway pod: set <code>GOOGLE_CLIENT_ID</code> (same client) so <code>POST /idp/google</code> can verify ID tokens.</li>
 </ol>

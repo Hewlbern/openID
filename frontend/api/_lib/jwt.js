@@ -47,12 +47,12 @@ function formatTTL(sec) {
 }
 
 function agentTTLSec() {
-  const raw = process.env.OPENID_AGENT_TOKEN_TTL;
+  const raw = process.env.OPENID_AGENT_TOKEN_TTL || process.env.AGENT_JWT_TTL;
   if (raw) {
     const n = parseInt(raw, 10);
     if (Number.isFinite(n) && n >= 60 && n <= 30 * 24 * 3600) return n;
   }
-  return 2 * 3600;
+  return 30 * 60;
 }
 
 function issueSparkToken({ webId, handle, sessionToken, ttlSec }) {
@@ -125,6 +125,13 @@ function isSparkTokenShape(token) {
 function resolveSessionToken(token) {
   if (!token) return "";
   if (!isSparkTokenShape(token)) return token;
+  try {
+    const { parseAgentToken } = require("./agent-token");
+    const agent = parseAgentToken(token);
+    if (agent.sessionToken) return agent.sessionToken;
+  } catch (e) {
+    /* fall through to spark parse */
+  }
   const spark = parseSparkToken(token);
   if (!spark.sessionToken) throw new Error("spark connect token missing session grant");
   return spark.sessionToken;

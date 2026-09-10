@@ -133,6 +133,17 @@ func TestAgentPromptAndSession(t *testing.T) {
 	if promptRes.StatusCode != 200 || !bytes.Contains(promptRaw, []byte("Help me save conversation traces")) {
 		t.Fatalf("prompt %d %s", promptRes.StatusCode, promptRaw)
 	}
+	var promptDoc map[string]any
+	if err := json.Unmarshal(promptRaw, &promptDoc); err != nil {
+		t.Fatal(err)
+	}
+	promptText, _ := promptDoc["prompt"].(string)
+	if !bytes.Contains([]byte(promptText), []byte("Authorization: Bearer <TOKEN>")) {
+		t.Fatalf("public prompt should use <TOKEN> placeholder: %s", promptText)
+	}
+	if promptDoc["auth"] != "Authorization: Bearer <TOKEN>" {
+		t.Fatalf("auth field %#v", promptDoc["auth"])
+	}
 	if bytes.Contains(promptRaw, []byte("megabot.tech")) {
 		t.Fatal("prompt leaked megabot")
 	}
@@ -180,8 +191,11 @@ func TestAgentPromptAndSession(t *testing.T) {
 	if err := json.Unmarshal(sessRaw, &doc); err != nil {
 		t.Fatal(err)
 	}
-	if doc["token"] == "" || doc["prompt"] == "" || doc["tokenKind"] != "spark-mcp" {
+	if doc["token"] == "" || doc["prompt"] == "" {
 		t.Fatalf("session body %#v", doc)
+	}
+	if doc["tokenKind"] != "access_token" && doc["tokenKind"] != "agent_jwt" && doc["tokenKind"] != "spark-mcp" {
+		t.Fatalf("session tokenKind %#v", doc["tokenKind"])
 	}
 	if !bytes.Contains([]byte(doc["prompt"].(string)), []byte(doc["token"].(string))) {
 		t.Fatal("prompt should embed minted token")

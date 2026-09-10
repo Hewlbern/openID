@@ -154,3 +154,7 @@ if (localStorage.getItem("openid.token")) {
   openidFetch("/idp/accounts/me")
     .then((r) => { if (r.ok) location.replace("/app"); });
 }
+
+window.openidOpenSignIn = function () {
+  showLogin(true);
+};

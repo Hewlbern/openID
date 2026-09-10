@@ -149,7 +149,7 @@ function showAccount() {
 
     <section class="walk-card agent-dock" id="agentDock">
       <h2><span class="step">0</span> Open / agent prompt</h2>
-      <p>Paste this into Codex, Cursor, Claude, or Grok. Copy remints a short-lived Bearer so the agent can save traces to <span class="mono">${escapeHtml(sparkDir())}</span> via MCP or REST. On 401, copy again.</p>
+      <p>The yellow <strong>PROMPT</strong> chip (bottom-left) copies the same brief. Signed-out Copy opens sign-in and does not mint. Signed-in Copy remints a ~30 minute Bearer for <span class="mono">${escapeHtml(sparkDir())}</span>. On 401, copy a fresh prompt.</p>
       <textarea id="agentPromptBox" class="agent-prompt" readonly rows="10" spellcheck="false"></textarea>
       <div class="row">
         <button type="button" class="btn" id="copyAgentPromptBtn">Copy agent prompt</button>
@@ -247,7 +247,9 @@ async function loadPublicAgentPrompt() {
   try {
     const res = await fetch("/api/agent/prompt", { headers: { Accept: "application/json" } });
     const doc = await res.json().catch(() => ({}));
-    if (box && doc.prompt) box.value = doc.prompt;
+    if (box && doc.prompt) {
+      box.value = String(doc.prompt).replace(/Authorization: Bearer \S+/g, "Authorization: Bearer <TOKEN>");
+    }
     return doc.prompt || "";
   } catch (e) {
     return "";
@@ -264,13 +266,20 @@ async function mintAndCopyAgentPrompt() {
   const text = await res.text();
   let doc = {};
   try { doc = JSON.parse(text); } catch (e) { doc = { error: text }; }
+  if (res.status === 401) {
+    setAgentHint("Session expired — sign in again, then copy a fresh prompt.", false);
+    setStatus("Sign in and copy a fresh prompt", false);
+    return "";
+  }
   if (!res.ok) {
     setAgentHint(doc.error || text || "Could not mint agent session.", false);
     setStatus(doc.error || "Agent prompt mint failed", false);
     return "";
   }
   const box = $("agentPromptBox");
-  if (box && doc.prompt) box.value = doc.prompt;
+  if (box && doc.prompt) {
+    box.value = String(doc.prompt).replace(/Authorization: Bearer \S+/g, "Authorization: Bearer <TOKEN>");
+  }
   const copied = await copyText(doc.prompt || "");
   const until = doc.expiresAt ? (" Expires " + doc.expiresAt + ".") : "";
   setAgentHint((copied ? "Copied. " : "Minted. Select the prompt to copy. ") + "Paste into Codex or Cursor." + until, true);
@@ -701,7 +710,11 @@ const copyPromptBtn = $("copyPromptBtn");
 if (copyPromptBtn) {
   copyPromptBtn.addEventListener("click", async () => {
     goYou();
-    await mintAndCopyAgentPrompt();
+    if (typeof window.openidMintAgentPrompt === "function") {
+      await window.openidMintAgentPrompt();
+    } else {
+      await mintAndCopyAgentPrompt();
+    }
     const dock = $("agentDock");
     if (dock) dock.scrollIntoView({ behavior: "smooth", block: "start" });
   });

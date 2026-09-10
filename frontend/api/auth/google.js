@@ -28,7 +28,7 @@ module.exports = async function handler(req, res) {
     res.status(200).json({
       configured: googleConfigured(),
       start: "/api/auth/google",
-      callback: "/api/auth/google/callback",
+      callback: "/auth/callback",
       clientIdSet: !!googleClientId(),
     });
     return;

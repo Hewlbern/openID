@@ -35,7 +35,7 @@ type Service struct {
 	byHandle  map[string]*Account
 	byID      map[string]*Account
 	clients   map[string]*ClientCredentials
-	sessions  map[string]string // cookie -> accountID
+	sessions  map[string]string      // cookie -> accountID
 	spark     map[string]*sparkGrant // jti -> grant
 	persistOK bool
 }
@@ -47,6 +47,7 @@ type Account struct {
 	Name         string    `json:"name,omitempty"`
 	Bio          string    `json:"bio,omitempty"`
 	PasswordHash string    `json:"-"`
+	GoogleSub    string    `json:"googleSub,omitempty"`
 	WebID        string    `json:"webId"`
 	PodPath      string    `json:"podPath"`
 	PublicURL    string    `json:"publicUrl,omitempty"`
@@ -85,6 +86,9 @@ func (s *Service) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("/.well-known/solid", s.handleSolidDescription)
 	mux.HandleFunc("/oauth/token", s.handleToken)
 	mux.HandleFunc("/api/config", s.handleConfig)
+	mux.HandleFunc("/api/agent/prompt", s.handleAgentPrompt)
+	mux.HandleFunc("/api/agent/session", s.handleAgentSession)
+	mux.HandleFunc("/llms.txt", s.handleLLMs)
 	mux.HandleFunc("/records/sparql", s.handleRecordsSPARQL)
 }
 
@@ -191,6 +195,8 @@ func (s *Service) handleIDP(w http.ResponseWriter, r *http.Request) {
 		s.createClientCredentials(w, r)
 	case path == "replica/adopt" && r.Method == http.MethodPost:
 		s.adoptReplica(w, r)
+	case path == "google" && r.Method == http.MethodPost:
+		s.handleGoogle(w, r)
 	case path == "auth" && r.Method == http.MethodGet:
 		// simplified authorize: redirect with code
 		s.authorize(w, r)
@@ -208,6 +214,10 @@ func (s *Service) handleIDP(w http.ResponseWriter, r *http.Request) {
 				"createPod":         s.BaseURL + "/idp/pods",
 				"clientCredentials": s.BaseURL + "/idp/client-credentials",
 				"sparkToken":        s.BaseURL + "/idp/spark-token",
+				"google":            s.BaseURL + "/idp/google",
+				"agentPrompt":       s.BaseURL + "/api/agent/prompt",
+				"agentSession":      s.BaseURL + "/api/agent/session",
+				"llms":              s.BaseURL + "/llms.txt",
 			},
 			"version": "solid-go/1.0",
 		})
@@ -229,6 +239,7 @@ var reservedHandles = map[string]bool{
 	"api": true, "admin": true, "www": true, "well-known": true,
 	"welcome": true, "dashboard": true, "login": true, "mcp": true, "records": true,
 	"share": true, "conversations": true,
+	"auth": true, "llms": true,
 }
 
 func (s *Service) handleAvailability(w http.ResponseWriter, handle string) {
@@ -489,6 +500,9 @@ func (s *Service) indexAccount(acc *Account) {
 	if acc.Email != "" {
 		s.accounts[acc.Email] = acc
 	}
+	if acc.GoogleSub != "" {
+		s.accounts["google:"+acc.GoogleSub] = acc
+	}
 	if acc.Handle != "" {
 		s.byHandle[acc.Handle] = acc
 		s.byHandle[strings.ToLower(acc.Handle)] = acc
@@ -502,6 +516,9 @@ func (s *Service) dropAccountLocked(acc *Account) {
 	}
 	if acc.Email != "" {
 		delete(s.accounts, acc.Email)
+	}
+	if acc.GoogleSub != "" {
+		delete(s.accounts, "google:"+acc.GoogleSub)
 	}
 	if acc.Handle != "" {
 		delete(s.byHandle, acc.Handle)
@@ -569,6 +586,7 @@ func (s *Service) adoptReplica(w http.ResponseWriter, r *http.Request) {
 		Name:         req.Account.Name,
 		Bio:          req.Account.Bio,
 		PasswordHash: hash,
+		GoogleSub:    req.Account.GoogleSub,
 		WebID:        webID,
 		PodPath:      req.Account.Handle + "/",
 		PublicURL:    s.BaseURL + "/i/" + req.Account.Handle,
@@ -824,6 +842,7 @@ type persistedAccount struct {
 	Name         string    `json:"name"`
 	Bio          string    `json:"bio"`
 	PasswordHash string    `json:"passwordHash"`
+	GoogleSub    string    `json:"googleSub,omitempty"`
 	WebID        string    `json:"webId"`
 	PodPath      string    `json:"podPath"`
 	PublicURL    string    `json:"publicUrl"`
@@ -844,7 +863,7 @@ func (s *Service) load() {
 	for _, p := range st.Accounts {
 		acc := &Account{
 			ID: p.ID, Handle: p.Handle, Email: p.Email, Name: p.Name, Bio: p.Bio,
-			PasswordHash: p.PasswordHash, WebID: p.WebID, PodPath: p.PodPath,
+			PasswordHash: p.PasswordHash, GoogleSub: p.GoogleSub, WebID: p.WebID, PodPath: p.PodPath,
 			PublicURL: p.PublicURL, Created: p.Created,
 		}
 		s.indexAccount(acc)
@@ -869,7 +888,7 @@ func (s *Service) saveLocked() {
 		seen[a.ID] = true
 		st.Accounts = append(st.Accounts, persistedAccount{
 			ID: a.ID, Handle: a.Handle, Email: a.Email, Name: a.Name, Bio: a.Bio,
-			PasswordHash: a.PasswordHash, WebID: a.WebID, PodPath: a.PodPath,
+			PasswordHash: a.PasswordHash, GoogleSub: a.GoogleSub, WebID: a.WebID, PodPath: a.PodPath,
 			PublicURL: a.PublicURL, Created: a.Created,
 		})
 	}

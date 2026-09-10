@@ -376,8 +376,16 @@ $("composer").addEventListener("submit", async (e) => {
   say("bot", res.ok ? "Saved to your notes." : "Could not write (" + res.status + ")");
 });
 
+window.openidOpenSignIn = function () {
+  $("authGate").hidden = false;
+  showAuth("login");
+  $("authGate").scrollIntoView({ behavior: "smooth", block: "center" });
+};
+
 (async function boot() {
   if (window.__TAURI_INTERNALS__) document.body.classList.add("tauri");
+  const googleErr = new URLSearchParams(location.search).get("google_error");
+  if (googleErr) setMsg("loginMsg", googleErr, "bad");
   await loadStatus();
   await loadSession();
 })();

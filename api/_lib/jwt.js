@@ -38,6 +38,23 @@ function verifyJwt(token, secret) {
   return payload;
 }
 
+function formatTTL(sec) {
+  const n = Number(sec) || 0;
+  if (n % 86400 === 0) return (n / 86400) + "d0h0m0s";
+  if (n % 3600 === 0) return (n / 3600) + "h0m0s";
+  if (n % 60 === 0) return (n / 60) + "m0s";
+  return n + "s";
+}
+
+function agentTTLSec() {
+  const raw = process.env.OPENID_AGENT_TOKEN_TTL || process.env.AGENT_JWT_TTL;
+  if (raw) {
+    const n = parseInt(raw, 10);
+    if (Number.isFinite(n) && n >= 60 && n <= 30 * 24 * 3600) return n;
+  }
+  return 30 * 60;
+}
+
 function issueSparkToken({ webId, handle, sessionToken, ttlSec }) {
   const secret = sparkSecret();
   const jti = crypto.randomBytes(16).toString("hex");
@@ -68,8 +85,13 @@ function issueSparkToken({ webId, handle, sessionToken, ttlSec }) {
     webId,
     expires: new Date(exp * 1000).toISOString(),
     expiresIn: ttl,
-    ttl: "720h0m0s",
+    ttl: formatTTL(ttl),
+    tokenKind: "spark-mcp",
   };
+}
+
+function issueAgentToken(opts) {
+  return issueSparkToken(Object.assign({}, opts, { ttlSec: opts.ttlSec || agentTTLSec() }));
 }
 
 function parseSparkToken(token) {
@@ -99,13 +121,33 @@ function isSparkTokenShape(token) {
   }
 }
 
+/** Unwrap a Vercel Spark/agent JWT to the Railway session Bearer. */
+function resolveSessionToken(token) {
+  if (!token) return "";
+  if (!isSparkTokenShape(token)) return token;
+  try {
+    const { parseAgentToken } = require("./agent-token");
+    const agent = parseAgentToken(token);
+    if (agent.sessionToken) return agent.sessionToken;
+  } catch (e) {
+    /* fall through to spark parse */
+  }
+  const spark = parseSparkToken(token);
+  if (!spark.sessionToken) throw new Error("spark connect token missing session grant");
+  return spark.sessionToken;
+}
+
 module.exports = {
   AUD,
   SCOPE,
   sparkSecret,
   signJwt,
   verifyJwt,
+  formatTTL,
+  agentTTLSec,
   issueSparkToken,
+  issueAgentToken,
   parseSparkToken,
   isSparkTokenShape,
+  resolveSessionToken,
 };

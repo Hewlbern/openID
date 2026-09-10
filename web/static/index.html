@@ -40,6 +40,11 @@
     </form>
 
     <div class="status" id="claimStatus"></div>
+    <p class="auth-or">or</p>
+    <a class="google-btn" id="googleBtn" href="/api/auth/google">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="#4285F4" d="M23.5 12.3c0-.8-.1-1.6-.2-2.3H12v4.4h6.4c-.3 1.5-1.2 2.8-2.5 3.7v3h4.1c2.4-2.2 3.5-5.4 3.5-8.8z"/><path fill="#34A853" d="M12 24c3.2 0 5.9-1.1 7.9-2.9l-4.1-3c-1.1.8-2.5 1.2-3.8 1.2-3 0-5.5-2-6.4-4.7H1.4v3.1C3.4 21.3 7.4 24 12 24z"/><path fill="#FBBC05" d="M5.6 14.6c-.2-.7-.4-1.4-.4-2.1s.1-1.4.4-2.1V7.3H1.4C.5 9.1 0 10.5 0 12.5s.5 3.4 1.4 5.2l4.2-3.1z"/><path fill="#EA4335" d="M12 4.8c1.7 0 3.3.6 4.5 1.8l3.4-3.4C17.9 1.2 15.2 0 12 0 7.4 0 3.4 2.7 1.4 6.7l4.2 3.1C6.5 6.8 9 4.8 12 4.8z"/></svg>
+      Continue with Google
+    </a>
     <p class="switch">
       <button type="button" id="loginBtn">Sign in</button>
       <button type="button" id="signupBtn" hidden>Claim a handle</button>
@@ -48,6 +53,7 @@
       <a href="/dashboard">Solid server</a>
       <a href="/app">Passport</a>
       <a href="/records">Your records</a>
+      <a href="/llms.txt">llms.txt</a>
       <span data-prefix>openid/i/</span>
     </div>
   </section>
@@ -69,5 +75,6 @@
     </form>
   </div>
   <script src="/static/site.js"></script>
+  <script src="/static/agent-dock.js"></script>
 </body>
 </html>

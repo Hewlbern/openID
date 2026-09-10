@@ -102,6 +102,26 @@ DELETE /api/spark-token   # revoke all, or ?jti=
 
 These routes are implemented on the Vercel passport. Railway `/idp/spark-token` is optional.
 
+### Open / agent prompt (Codex / Cursor / Claude / Grok)
+
+Same manner as a hosted copy-dock: the human signs in on `/app`, copies a prompt, and pastes it into their coding agent. The prompt tells the agent to use OpenID MCP + REST — not a robot workshop.
+
+```
+GET  /llms.txt              # docs; CORS *
+GET  /api/agent/prompt      # { prompt, docs, mint, auth } — Bearer <TOKEN>; does not mint
+POST /api/agent/session     # signed-in browser only → { prompt, token, expiresAt, tokenKind }
+```
+
+Public GET uses `Authorization: Bearer <TOKEN>` and never mints. Signed-in POST remints: a dedicated ~30 minute user-scoped JWT when `AGENT_JWT_SECRET` (or an existing Spark/Solid HMAC) is set; otherwise it embeds the session access token. Never a service-role key. The yellow **PROMPT** chip on `/` and `/app` copies the brief — signed-out Copy opens sign-in and does not mint; signed-in Copy remints. On HTTP 401 the agent must ask the human to copy a fresh prompt. Auth header for private APIs: `Authorization: Bearer <TOKEN>`.
+
+An agent that received a copied prompt should:
+
+1. `GET /llms.txt` if it needs the recipe.
+2. Send `Authorization: Bearer <token>` on `/mcp` and `/api/spark-conversations`.
+3. Call `spark_save_conversation` (or `POST /api/spark-conversations`) with the full transcript and `source` (`codex`, `cursor`, `claude`, `grok`, `gemini-spark`).
+4. Commit one write at a time. Never invent credentials.
+5. Send the human `https://askclaw.xyz/app` when done.
+
 Spark must call `spark_save_conversation` with `title` and `messages: [{role, content|text, timestamp?}]`. It returns `resourceUrl`, `webId`, optional `shareUrl`, and `confirmation` text to show you.
 
 MCP tools: `spark_save_conversation`, `spark_list_conversations`, `spark_get_conversation`, `spark_share_conversation`, `spark_unshare_conversation`.
@@ -123,17 +143,18 @@ The Solid server is a long-lived Go process with a volume (LDP storage). The mar
 
 | Role | URL |
 |------|-----|
-| Passport / marketing | https://identity-two-plum.vercel.app |
+| Passport / marketing | https://askclaw.xyz (also https://identity-two-plum.vercel.app) |
 | Solid pod (Railway) | https://pod-production-ebe1.up.railway.app |
 
 **Create an ID and log in (about a minute)**
 
-1. Open https://identity-two-plum.vercel.app
-2. Claim a handle + password (or **Sign in**).
+1. Open https://askclaw.xyz
+2. Claim a handle + password, **Sign in**, or **Continue with Google**.
 3. You land on `/app`. Your WebID is shown on the account pane (`https://pod-production-ebe1.up.railway.app/{handle}/profile/card#me`).
-4. On `/app`, **Create / copy connect token**, add `https://identity-two-plum.vercel.app/mcp` in Spark, then say **Save this conversation to my Solid pod.**
-5. Or use **Save** on `/app` as a paste fallback, then **Share**.
-6. Sign out, then sign back in with the same handle + password.
+4. On `/app`, use the yellow **PROMPT** chip (or **Copy agent prompt**) and paste it into Codex / Cursor / Claude / Grok. The agent uses MCP (`https://askclaw.xyz/mcp`) to write traces to `{handle}/conversations/spark/`.
+5. For a standing Gemini Spark connection, **Create / copy connect token**, add `https://askclaw.xyz/mcp`, then say **Save this conversation to my Solid pod.**
+6. Or use **Save** on `/app` as a paste fallback, then **Share**.
+7. Sign out, then sign back in with the same handle + password (or Google).
 
 **Environment**
 
@@ -145,13 +166,34 @@ The Solid server is a long-lived Go process with a volume (LDP storage). The mar
 | `OPENID_POD` | Vercel build | Pod origin the site proxies to. Defaults to the Railway URL above. |
 | `OPENID_API` | Vercel build | Leave empty so the browser stays on the Vercel origin. |
 | `OPENID_SPARK_SECRET` | Vercel | HMAC secret for 30-day Spark connect tokens. Falls back to `SOLID_TOKEN_SECRET` then a preview default. Set a real secret in production. |
+| `AGENT_JWT_SECRET` | Vercel / Railway | Optional dedicated HMAC for ~30m agent session JWTs. If unset, `POST /api/agent/session` embeds the signed-in session access token (or signs with the Spark/Solid secret when that is set). Never a service-role key. |
+| `OPENID_PUBLIC_URL` | Vercel | Public passport origin baked into `/llms.txt` and agent prompts. Defaults to the request host (`https://askclaw.xyz`). |
+| `OPENID_AGENT_TOKEN_TTL` | Vercel / Railway | Agent session lifetime in seconds (default `1800`). |
+| `GOOGLE_CLIENT_ID` | Vercel + Railway | New Web OAuth client for askclaw (dreammachina GCP). Do **not** reuse megabot’s Supabase client. |
+| `GOOGLE_CLIENT_SECRET` | Vercel | OAuth client secret. Never commit it. |
+| `GOOGLE_REDIRECT_URI` | Vercel | Optional override. Default: `{origin}/auth/callback`. |
 
 ```bash
 # frontend (repo root or frontend/)
 OPENID_POD=https://pod-production-ebe1.up.railway.app vercel --prod
 ```
 
-Passport features (save / list / share / Spark connect token / MCP) are implemented on Vercel (`/api/spark-conversations`, `/api/spark-share`, `/share/c/…`, `/api/spark-token`, `/mcp`). Railway is only the Solid volume. A Railway redeploy is optional and not required for those use cases.
+Passport features (save / list / share / Spark connect token / MCP / agent prompt) are implemented on Vercel (`/api/spark-conversations`, `/api/spark-share`, `/share/c/…`, `/api/spark-token`, `/api/agent/*`, `/mcp`, `/llms.txt`). Railway is the Solid volume plus `POST /idp/google` for linking a Google account to a WebID. A Railway redeploy is needed for Google linking of **existing** handle accounts; new Google users can still be provisioned via `/idp/register` until that route is live.
+
+**Google Cloud Console (dreammachina — new client, do not edit megabot)**
+
+1. APIs & Services → Credentials → Create credentials → OAuth client ID → **Web application**. Name it `askclaw` / `openid`.
+2. Authorized JavaScript origins:
+   - `https://askclaw.xyz`
+   - `https://identity-two-plum.vercel.app`
+   - `http://localhost:3000`
+3. Authorized redirect URIs:
+   - `https://askclaw.xyz/auth/callback`
+   - `https://identity-two-plum.vercel.app/auth/callback`
+   - `http://localhost:3000/auth/callback`
+4. Vercel project `identity` (hewlberns-projects): `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`.
+5. Railway pod: `GOOGLE_CLIENT_ID` (same client) so `POST /idp/google` can check the ID token audience.
+6. Leave megabot’s existing Supabase callback (`https://lrmgqtumhzvtbdvfqxiw.supabase.co/auth/v1/callback`) untouched.
 
 **Railway (pod origin)**
 
@@ -252,7 +294,13 @@ When OTS calendars are unreachable, a **pending local proof** is stored and can 
 
 | Endpoint | Purpose |
 |----------|---------|
-| `GET/POST /mcp` | MCP for Grok Bot and Gemini Spark (Vercel `/api/mcp`; session Bearer or Spark token) |
+| `GET /llms.txt` | Agent-facing docs (MCP, auth, save/list/share, recipe) |
+| `GET /api/agent/prompt` | Copyable instructions; no token minted; CORS `*` |
+| `POST /api/agent/session` | Signed-in mint `{ prompt, token, expiresAt, tokenKind }` (~30m JWT or session access token) |
+| `GET /api/auth/google` | Start Google OAuth (Vercel; alias `GET /auth/google`) |
+| `GET /auth/callback` | Google OAuth callback → session on `/app` (alias `/api/auth/google/callback`) |
+| `POST /idp/google` | Pod-side Google ID token → WebID session |
+| `GET/POST /mcp` | MCP for Grok Bot, Codex/Cursor, and Gemini Spark (Vercel `/api/mcp`; session Bearer or Spark/agent token) |
 | `GET/POST /api/spark-conversations` | Save / list Spark conversations (Vercel → LDP; no Railway `/conversations`) |
 | `POST /api/spark-conversations/{id}/share` | Mint `/share/c/{token}` (public snapshot) |
 | `POST /api/spark-conversations/{id}/unshare` | Revoke share (public GET 404 afterwards) |

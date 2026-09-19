@@ -1,0 +1,10 @@
+providers = ["go"]
+
+[variables]
+GO_VERSION = "1.24"
+
+[phases.build]
+cmds = ["CGO_ENABLED=0 GOOS=linux go build -o /tmp/solidgo ./cmd/server"]
+
+[start]
+cmd = "exec /tmp/solidgo -port ${PORT:-${SOLID_PORT:-3000}} -storage ${SOLID_STORAGE_PATH:-/data}"

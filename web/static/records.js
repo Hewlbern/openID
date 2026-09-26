@@ -133,6 +133,34 @@ $("loginForm").addEventListener("submit", async (e) => {
   openArchive();
 });
 
+$("forgotBtn").addEventListener("click", () => {
+  $("loginForm").hidden = true;
+  $("forgotForm").hidden = false;
+});
+$("forgotBack").addEventListener("click", () => {
+  $("forgotForm").hidden = true;
+  $("loginForm").hidden = false;
+});
+$("forgotForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const id = String(new FormData(e.target).get("id") || "").trim();
+  $("forgotMsg").className = "auth-msg";
+  $("forgotMsg").textContent = "Sending…";
+  try {
+    const res = await fetch(openidURL("/idp/password/forgot"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(id.includes("@") ? { email: id } : { handle: id }),
+    });
+    const data = await res.json().catch(() => ({}));
+    $("forgotMsg").className = "auth-msg" + (res.ok ? " ok" : " bad");
+    $("forgotMsg").textContent = data.message || "If an account with a deliverable email matches, a reset link is on its way.";
+  } catch (err) {
+    $("forgotMsg").className = "auth-msg bad";
+    $("forgotMsg").textContent = "Could not reach the pod.";
+  }
+});
+
 $("logout").addEventListener("click", () => {
   setToken("");
   sparqlIDs = null;
@@ -168,14 +196,27 @@ $("sparqlForm").addEventListener("submit", (e) => {
 $("pwForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   $("pwMsg").textContent = "";
-  const password = new FormData(e.target).get("password");
+  const fd = new FormData(e.target);
+  const body = {
+    email: String(fd.get("email") || "").trim(),
+    currentPassword: String(fd.get("currentPassword") || ""),
+  };
+  const password = String(fd.get("password") || "");
+  if (password) body.password = password;
   const res = await fetch(openidURL("/idp/profile"), {
     method: "PATCH",
     headers: Object.assign({ "Content-Type": "application/json" }, headers()),
-    body: JSON.stringify({ password }),
+    body: JSON.stringify(body),
   });
-  $("pwMsg").textContent = res.ok ? "Password saved." : "Could not update password.";
-  if (res.ok) e.target.reset();
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    $("pwMsg").textContent = res.status === 401 ? "Current password did not match." : "Could not update account.";
+    return;
+  }
+  if (data.token) setToken(data.token);
+  $("pwMsg").textContent = "Saved.";
+  e.target.elements.currentPassword.value = "";
+  e.target.elements.password.value = "";
 });
 
 document.querySelectorAll("[data-reveal]").forEach((btn) => {
@@ -210,6 +251,9 @@ async function openArchive() {
     traces = graph(await api("/" + handle + "/records/cursor/transcripts.jsonld"));
     grokDoc = await api("/" + handle + "/records/grokbot/settings.jsonld").catch(() => ({}));
     enterArchive();
+    if (me.email && $("pwForm") && $("pwForm").elements.email && !$("pwForm").elements.email.value) {
+      $("pwForm").elements.email.value = me.email;
+    }
     $("whoLine").textContent = (me.name || me.handle) + " · /" + handle + "/records/";
     $("rawLink").href = "/" + handle + "/records/catalog.jsonld";
     $("rdfLink").href = "/" + handle + "/records/catalog.ttl";

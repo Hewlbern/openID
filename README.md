@@ -145,6 +145,33 @@ The Solid server is a long-lived Go process with a volume (LDP storage). The mar
 | `OPENID_POD` | Vercel build | Pod origin the site proxies to. Defaults to the Railway URL above. |
 | `OPENID_API` | Vercel build | Leave empty so the browser stays on the Vercel origin. |
 | `OPENID_SPARK_SECRET` | Vercel | HMAC secret for 30-day Spark connect tokens. Falls back to `SOLID_TOKEN_SECRET` then a preview default. Set a real secret in production. |
+| `OPENID_PUBLIC_URL` | Railway | Site origin used in password-reset links. Set to `https://askclaw.xyz`. |
+| `OPENID_ADMIN_RESET_SECRET` | Railway | Operator secret for one-time reset links when an account has no deliverable email. |
+| `OPENID_EMAIL_FROM` | Railway | From address for reset mail. Required when a provider is set. |
+| `RESEND_API_KEY` | Railway | Resend API key. If unset and SMTP is unset, forgot-password does not send mail. |
+| `OPENID_SMTP_HOST` | Railway | SMTP host (port `OPENID_SMTP_PORT`, default 587; `OPENID_SMTP_USER` / `OPENID_SMTP_PASSWORD`). |
+
+## Password reset
+
+Sign-in pages (`/`, `/login`, `/records`) include **Forgot password**. The pod always answers the same way, whether or not the account exists. A one-time link is emailed only when the stored address is deliverable (not `localhost`, `.local`, or `.invalid`) and a mail provider is configured. The link is `https://<OPENID_PUBLIC_URL>/reset#token=…` (the token stays in the URL fragment). It expires in 30 minutes. Using it sets a new password and invalidates that account's cookies, bearer tokens, and Spark grants.
+
+Accounts such as `mike@localhost` cannot receive mail. An operator with `OPENID_ADMIN_RESET_SECRET` issues a link (valid 2 hours):
+
+```bash
+OPENID_ADMIN_RESET_SECRET=… go run ./cmd/admin-reset -base https://pod-production-ebe1.up.railway.app -handle mike
+```
+
+Or `POST /idp/password/admin-reset` with header `X-OpenID-Admin-Secret`. The route is 404 when the secret is unset. Wrong secrets are rate-limited. Audit lines record the handle and action, never the token or password.
+
+A signed-in user can set email and password with `PATCH /idp/profile` (`currentPassword` required). Changing the password signs out other sessions.
+
+`/.openid/` (accounts, reset tokens, audit) is not served over HTTP. The server does not write plaintext passwords. Replica sync uses `SOLID_SYNC_PASSWORD` only.
+
+To revoke client credentials that were exposed with the accounts file:
+
+```bash
+OPENID_ADMIN_RESET_SECRET=… go run ./cmd/admin-reset -base https://pod-production-ebe1.up.railway.app -revoke-clients -all
+```
 
 ```bash
 # frontend (repo root or frontend/)
@@ -174,7 +201,7 @@ The **pod is the product**. Anyone can run the same Docker image — locally, on
 docker compose up -d
 ```
 
-Set `SOLID_BASE_URL` to the URL others will use for WebIDs. To also keep a replica of a handle on another origin (for example Railway):
+Set `SOLID_BASE_URL` to the URL others will use for WebIDs. To also keep a replica of a handle on another origin, set `SOLID_SYNC_PASSWORD` (the server no longer reads a password file):
 
 ```bash
 SOLID_BASE_URL=http://localhost:3000 \

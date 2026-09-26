@@ -42,6 +42,8 @@ func (h *Handler) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("/dashboard", h.ServeDashboard)
 	mux.HandleFunc("/dashboard/", h.ServeDashboard)
 	mux.HandleFunc("/login", h.ServeDashboard)
+	mux.HandleFunc("/reset", h.serveReset)
+	mux.HandleFunc("/reset/", h.serveReset)
 	mux.HandleFunc("/records", h.serveRecords)
 	mux.HandleFunc("/records/", h.serveRecords)
 }
@@ -64,6 +66,10 @@ func (h *Handler) serveApp(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) serveRecords(w http.ResponseWriter, r *http.Request) {
 	h.serveFile(w, r, "records.html")
+}
+
+func (h *Handler) serveReset(w http.ResponseWriter, r *http.Request) {
+	h.serveFile(w, r, "reset.html")
 }
 
 func (h *Handler) servePublic(w http.ResponseWriter, r *http.Request) {

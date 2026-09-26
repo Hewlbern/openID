@@ -39,10 +39,18 @@
       </button>
     </form>
 
+    <form class="forgot" id="forgotForm" hidden>
+      <p class="lead">Email a reset link</p>
+      <div class="field"><input name="id" required placeholder="Handle or email" autocomplete="username" aria-label="Handle or email" /></div>
+      <button class="btn wide" type="submit">Send reset link</button>
+    </form>
+
     <div class="status" id="claimStatus"></div>
     <p class="switch">
       <button type="button" id="loginBtn">Sign in</button>
       <button type="button" id="signupBtn" hidden>Claim a handle</button>
+      <button type="button" id="forgotBtn" hidden>Forgot password</button>
+      <button type="button" id="forgotBack" hidden>Back to sign in</button>
     </p>
     <div class="chips">
       <a href="/dashboard">Solid server</a>

@@ -31,12 +31,13 @@ var (
 
 // Credentials holds authenticated agent identity.
 type Credentials struct {
-	WebID  string
-	Client string
-	Via    string // bearer, dpop, client_credentials, agent_sig
-	Scope  string
-	Aud    string
-	JTI    string
+	WebID    string
+	Client   string
+	Via      string // bearer, dpop, client_credentials, agent_sig
+	Scope    string
+	Aud      string
+	JTI      string
+	IssuedAt time.Time
 }
 
 // IsSpark reports whether these credentials are a Spark connect token.
@@ -54,6 +55,8 @@ type TokenService struct {
 	// dpopJTIs for replay protection (short-lived)
 	dpopSeen map[string]time.Time
 	revoked  map[string]bool
+	// versions is the password-generation stamped into new bearer tokens.
+	versions map[string]int
 }
 
 func NewTokenService(secret string) *TokenService {
@@ -71,6 +74,7 @@ type webIDClaims struct {
 	WebID  string `json:"webid"`
 	Client string `json:"client_id,omitempty"`
 	Scope  string `json:"scope,omitempty"`
+	Ver    int    `json:"ver,omitempty"`
 	jwt.RegisteredClaims
 }
 
@@ -90,6 +94,7 @@ func (t *TokenService) Issue(webID, client string, ttl time.Duration) (string, e
 	claims := webIDClaims{
 		WebID:  webID,
 		Client: client,
+		Ver:    t.TokenVersion(webID),
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(ttl)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
@@ -113,6 +118,7 @@ func (t *TokenService) IssueSpark(webID string, ttl time.Duration) (token, jti s
 	claims := webIDClaims{
 		WebID: webID,
 		Scope: ScopeSpark,
+		Ver:   t.TokenVersion(webID),
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(exp),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
@@ -136,6 +142,35 @@ func (t *TokenService) RevokeJTI(jti string) {
 	t.mu.Lock()
 	t.revoked[jti] = true
 	t.mu.Unlock()
+}
+
+// SetTokenVersion records the password generation for webID. New tokens
+// carry it; older generations stop validating. Calls only move forward.
+func (t *TokenService) SetTokenVersion(webID string, v int) {
+	if t == nil || webID == "" || v <= 0 {
+		return
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.versions == nil {
+		t.versions = map[string]int{}
+	}
+	if cur := t.versions[webID]; v > cur {
+		t.versions[webID] = v
+	}
+}
+
+// TokenVersion is the current password generation for webID (0 if unset).
+func (t *TokenService) TokenVersion(webID string) int {
+	if t == nil || webID == "" {
+		return 0
+	}
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	if t.versions == nil {
+		return 0
+	}
+	return t.versions[webID]
 }
 
 func (t *TokenService) IsRevoked(jti string) bool {
@@ -169,13 +204,21 @@ func (t *TokenService) Parse(token string) (*Credentials, error) {
 	if claims.ID != "" && t.IsRevoked(claims.ID) {
 		return nil, ErrRevoked
 	}
+	var issued time.Time
+	if claims.IssuedAt != nil {
+		issued = claims.IssuedAt.Time
+	}
+	if claims.Ver != t.TokenVersion(claims.WebID) {
+		return nil, ErrRevoked
+	}
 	return &Credentials{
-		WebID:  claims.WebID,
-		Client: claims.Client,
-		Via:    "bearer",
-		Scope:  scope,
-		Aud:    aud,
-		JTI:    claims.ID,
+		WebID:    claims.WebID,
+		Client:   claims.Client,
+		Via:      "bearer",
+		Scope:    scope,
+		Aud:      aud,
+		JTI:      claims.ID,
+		IssuedAt: issued,
 	}, nil
 }
 

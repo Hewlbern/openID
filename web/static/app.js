@@ -164,6 +164,16 @@ function showAccount() {
         <a class="btn ghost" href="${escapeHtml(account.publicUrl || "/i/" + account.handle)}">Public page</a>
       </div>
       <p class="hint" id="youHint"></p>
+      <form id="accountForm" class="stack" style="margin-top:14px">
+        <label>Email</label>
+        <input id="accountEmail" type="email" autocomplete="email" placeholder="you@example.com" value="${escapeHtml(account.email || "")}" />
+        <label>Current password</label>
+        <input id="accountCurrent" type="password" autocomplete="current-password" />
+        <label>New password</label>
+        <input id="accountNext" type="password" minlength="8" autocomplete="new-password" placeholder="leave blank to keep" />
+        <button class="btn" type="submit">Save email and password</button>
+        <p class="hint" id="accountMsg">A real email lets you reset your password from the sign-in page. Changing the password signs out other sessions.</p>
+      </form>
     </section>
 
     <section class="walk-card" id="importCard">
@@ -234,6 +244,37 @@ function bindYouCard() {
   });
   if (webBtn) webBtn.addEventListener("click", async () => {
     setHint("youHint", await copyText(account.webId) ? "Copied WebID." : account.webId, true);
+  });
+  const accountForm = $("accountForm");
+  if (accountForm) accountForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const body = {
+      email: $("accountEmail").value.trim(),
+      currentPassword: $("accountCurrent").value,
+    };
+    if ($("accountNext").value) body.password = $("accountNext").value;
+    setHint("accountMsg", "Saving…");
+    try {
+      const res = await openidFetch("/idp/profile", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setHint("accountMsg", res.status === 401 ? "Current password did not match." : "Could not update account.", false);
+        return;
+      }
+      if (data.token) {
+        try { localStorage.setItem(tokenKey, data.token); } catch (err) {}
+      }
+      if (data.email != null) account.email = data.email;
+      $("accountCurrent").value = "";
+      $("accountNext").value = "";
+      setHint("accountMsg", "Saved.", true);
+    } catch (err) {
+      setHint("accountMsg", "Could not reach the pod.", false);
+    }
   });
 }
 

@@ -33,6 +33,7 @@ function showAuth(which) {
   $("tabRegister").classList.toggle("on", !login);
   $("loginForm").hidden = !login;
   $("registerForm").hidden = login;
+  if ($("forgotForm")) $("forgotForm").hidden = true;
   const first = login ? field($("loginForm"), "handle") : field($("registerForm"), "handle");
   if (first) first.focus();
 }
@@ -88,6 +89,8 @@ async function loadSession() {
   $("sessionActions").innerHTML = "";
   if (!token) {
     account = null;
+    const accountForm = $("accountForm");
+    if (accountForm) accountForm.hidden = true;
     setSignedIn(false);
     $("who").textContent = "Sign in to your pod. One identity for you and the agents you allow.";
     $("webid").textContent = "";
@@ -99,6 +102,8 @@ async function loadSession() {
   const res = await fetch(openidURL("/idp/accounts/me"), { headers: headers() });
   if (!res.ok) {
     setToken("");
+    const accountForm = $("accountForm");
+    if (accountForm) accountForm.hidden = true;
     return loadSession();
   }
   account = await res.json();
@@ -109,6 +114,11 @@ async function loadSession() {
   $("meAvatar").textContent = "";
   $("headTitle").textContent = account.name || account.handle;
   $("composerHint").textContent = "Notes save to /" + account.podPath + "notes/";
+  const accountForm = $("accountForm");
+  if (accountForm) {
+    accountForm.hidden = false;
+    if (account.email) field(accountForm, "email").value = account.email;
+  }
   $("sessionActions").innerHTML = `
     <a class="btn" href="/app">Passport</a>
     <a class="btn" href="/records">Records</a>
@@ -120,6 +130,7 @@ async function loadSession() {
       await fetch(openidURL("/idp/logout"), { method: "POST" });
       setToken("");
       account = null;
+      if (accountForm) accountForm.hidden = true;
       $("stream").innerHTML = "";
       closeDrawer();
       loadSession();
@@ -165,6 +176,70 @@ $("loginForm").addEventListener("submit", async (e) => {
     setMsg("loginMsg", "Could not reach the pod.", "bad");
   } finally {
     btn.disabled = false;
+  }
+});
+
+function showForgot(on) {
+  $("loginForm").hidden = on;
+  $("registerForm").hidden = true;
+  $("forgotForm").hidden = !on;
+  $("tabLogin").classList.toggle("on", !on);
+  $("tabRegister").classList.toggle("on", false);
+  if (!on) $("loginForm").hidden = $("tabLogin").classList.contains("on") ? false : true;
+}
+
+$("forgotBtn").addEventListener("click", () => showForgot(true));
+$("forgotBack").addEventListener("click", () => {
+  showForgot(false);
+  $("loginForm").hidden = false;
+  $("tabLogin").classList.add("on");
+});
+$("forgotForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const id = field(e.currentTarget, "id").value.trim();
+  setMsg("forgotMsg", "Sending…");
+  try {
+    const res = await fetch(openidURL("/idp/password/forgot"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(id.includes("@") ? { email: id } : { handle: id }),
+    });
+    const data = await res.json().catch(() => ({}));
+    setMsg("forgotMsg", data.message || "Check your email if that account can receive one.", res.ok ? "ok" : "bad");
+  } catch (err) {
+    setMsg("forgotMsg", "Could not reach the pod.", "bad");
+  }
+});
+
+$("accountForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const form = e.currentTarget;
+  const msg = $("accountMsg");
+  msg.textContent = "Saving…";
+  const body = {
+    email: field(form, "email").value.trim(),
+    currentPassword: field(form, "currentPassword").value,
+  };
+  const next = field(form, "password").value;
+  if (next) body.password = next;
+  try {
+    const res = await fetch(openidURL("/idp/profile"), {
+      method: "PATCH",
+      headers: Object.assign({ "Content-Type": "application/json" }, headers()),
+      body: JSON.stringify(body),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      msg.textContent = res.status === 401 ? "Current password did not match." : "Could not update account.";
+      return;
+    }
+    if (data.token) setToken(data.token);
+    if (data.email != null && account) account.email = data.email;
+    msg.textContent = "Saved. Other sessions were signed out if the password changed.";
+    field(form, "currentPassword").value = "";
+    field(form, "password").value = "";
+  } catch (err) {
+    msg.textContent = "Could not reach the pod.";
   }
 });
 

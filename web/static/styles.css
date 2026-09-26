@@ -86,6 +86,22 @@ html, body { height: 100%; }
 .switch button:hover { color: var(--ink); }
 .switch button[hidden] { display: none; }
 
+.forgot {
+  width: min(440px, 100%);
+  text-align: left;
+  margin-top: 8px;
+}
+.forgot[hidden] { display: none !important; }
+.forgot .lead { text-align: center; }
+.forgot .field input {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 12px 14px;
+  font: inherit;
+}
+
 .chips {
   display: flex;
   flex-wrap: wrap;

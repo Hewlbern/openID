@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -114,6 +115,7 @@ func NewServer(opts *ServerOptions) *Server {
 	auditLog := audit.New(rs, ipfsClient, otsClient, opts.AuditBatchEvery)
 	agents := agent.NewRegistry(rs, tokens, opts.BaseURL)
 	idp := identityapi.New(rs, tokens, opts.BaseURL)
+	idp.Logger = opts.Logger
 
 	onAudit := func(ctx context.Context, agentWebID, method, path string, body []byte) {
 		pk, _ := agents.PrivateKey(agentWebID)
@@ -213,32 +215,43 @@ func (s *Server) bootstrap(ctx context.Context) {
 	rootACL := wac.DefaultPublicACL(s.opts.BaseURL+"/", "")
 	_, _ = s.store.Put(ctx, ".acl", "text/turtle", []byte(rootACL), "", "")
 	_ = s.store.EnsureContainer(ctx, "audit/")
+	// Deny-all ACL in front of server state. HTTP handlers also 404 these
+	// paths; the ACL is a second gate if a request ever reaches WAC.
+	_, _ = s.store.Put(ctx, ".openid/.acl", "text/turtle", []byte("@prefix acl: <http://www.w3.org/ns/auth/acl#>.\n"), "", "")
+	s.purgePlaintextAuth(ctx)
 	s.audit.Start(ctx)
 	s.startReplica(ctx)
+}
+
+// purgePlaintextAuth deletes .openid/local-auth.json. Older builds wrote the
+// account password there in plaintext so a replica could log in. The file is
+// not migrated: the password hash already lives in accounts.json, and sync
+// must use SOLID_SYNC_PASSWORD.
+func (s *Server) purgePlaintextAuth(ctx context.Context) {
+	existed := false
+	if ok, err := s.store.Exists(ctx, ".openid/local-auth.json"); err == nil && ok {
+		existed = true
+	}
+	_ = s.store.Delete(ctx, ".openid/local-auth.json", "")
+	if s.opts.StoragePath != "" {
+		base := filepath.Join(s.opts.StoragePath, ".openid")
+		for _, name := range []string{"local-auth.json", "local-auth.json.meta.json"} {
+			p := filepath.Join(base, name)
+			if _, err := os.Stat(p); err == nil {
+				existed = true
+			}
+			_ = os.Remove(p)
+		}
+	}
+	if existed {
+		s.logger.Info("removed plaintext password file .openid/local-auth.json")
+	}
 }
 
 func (s *Server) startReplica(ctx context.Context) {
 	peer := strings.TrimRight(s.opts.SyncPeer, "/")
 	password := s.opts.SyncPassword
 	handle := s.opts.SyncHandle
-	if raw, err := os.ReadFile(s.opts.StoragePath + "/.openid/local-auth.json"); err == nil {
-		var auth struct {
-			Handle   string `json:"handle"`
-			Password string `json:"password"`
-			Peer     string `json:"peer"`
-		}
-		if json.Unmarshal(raw, &auth) == nil {
-			if password == "" {
-				password = auth.Password
-			}
-			if handle == "" {
-				handle = auth.Handle
-			}
-			if peer == "" {
-				peer = strings.TrimRight(auth.Peer, "/")
-			}
-		}
-	}
 	if peer == "" || password == "" || s.opts.StoragePath == "" {
 		return
 	}

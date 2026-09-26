@@ -3,8 +3,9 @@
  * Embeds the session Bearer so /api/mcp can write LDP to Railway without
  * Railway understanding spark JWTs.
  */
-const { podFetch, accountMe, bearer, requestOrigin, ensureContainer } = require("./_lib/pod");
-const { issueSparkToken, parseSparkToken, AUD, SCOPE } = require("./_lib/jwt");
+const { accountMe, bearer } = require("./_lib/pod");
+const { parseSparkToken, AUD, SCOPE } = require("./_lib/jwt");
+const { mintSparkConnect, grantsPath, loadJSON, saveJSON, mcpUrlFromReq } = require("./_lib/spark-mint");
 
 function cors(res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -12,29 +13,8 @@ function cors(res) {
   res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type, Accept");
 }
 
-function grantsPath(handle) {
-  return "/" + handle + "/.openid/spark-grants.json";
-}
-
 function revokedPath(handle) {
   return "/" + handle + "/.openid/spark-revoked.json";
-}
-
-async function loadJSON(token, path, fallback) {
-  const got = await podFetch(path, { token, headers: { Accept: "application/json" } });
-  if (got.status >= 400) return fallback;
-  try { return JSON.parse(got.text); } catch (e) { return fallback; }
-}
-
-async function saveJSON(token, handle, path, doc) {
-  await ensureContainer(token, "/" + handle + "/.openid/");
-  const put = await podFetch(path, {
-    method: "PUT",
-    token,
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(doc, null, 2),
-  });
-  if (put.status >= 400) throw new Error("persist " + path + " " + put.status + " " + put.text);
 }
 
 module.exports = async function handler(req, res) {
@@ -59,8 +39,7 @@ module.exports = async function handler(req, res) {
 
   try {
     const acc = await accountMe(session);
-    const origin = requestOrigin(req) || ("https://" + (req.headers.host || "localhost"));
-    const mcpUrl = origin.replace(/\/$/, "") + "/mcp";
+    const mcpUrl = mcpUrlFromReq(req);
 
     if (req.method === "GET") {
       const file = await loadJSON(session, grantsPath(acc.handle), { grants: [] });
@@ -84,25 +63,8 @@ module.exports = async function handler(req, res) {
     }
 
     if (req.method === "POST") {
-      const minted = issueSparkToken({
-        webId: acc.webId,
-        handle: acc.handle,
-        sessionToken: session,
-      });
-      const file = await loadJSON(session, grantsPath(acc.handle), { grants: [] });
-      file.grants = file.grants || [];
-      file.grants.push({
-        jti: minted.jti,
-        webId: acc.webId,
-        issued: new Date().toISOString(),
-        expires: minted.expires,
-        revoked: false,
-      });
-      await saveJSON(session, acc.handle, grantsPath(acc.handle), file);
-      res.status(200).json(Object.assign({}, minted, {
-        tokenType: "Bearer",
-        mcpUrl,
-      }));
+      const minted = await mintSparkConnect(session, req);
+      res.status(200).json(minted);
       return;
     }
 

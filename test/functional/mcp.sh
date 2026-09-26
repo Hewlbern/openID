@@ -92,7 +92,7 @@ assert_eq "initialized notification" "202" "$NOTE"
 LIST=$(rpc '{"jsonrpc":"2.0","id":2,"method":"tools/list"}')
 for tool in openid_open openid_status openid_discover openid_register openid_login \
   openid_register_agent openid_pod_put openid_pod_get openid_audit_flush \
-  spark_save_conversation spark_list_conversations spark_share_conversation; do
+  spark_login spark_register spark_save_conversation spark_list_conversations spark_share_conversation; do
   assert_contains "tools/list $tool" "$tool" "$LIST"
 done
 

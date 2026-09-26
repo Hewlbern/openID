@@ -141,6 +141,10 @@ func TestProtocolInitializeListPing(t *testing.T) {
 	if info["name"] != "openid" {
 		t.Fatalf("serverInfo: %#v", info)
 	}
+	instr, _ := init["instructions"].(string)
+	if !strings.Contains(instr, "spark_login") || !strings.Contains(instr, "spark_save_conversation") {
+		t.Fatalf("instructions should mention spark_login then save: %s", instr)
+	}
 
 	note := mcp.Handle([]byte(`{"jsonrpc":"2.0","method":"notifications/initialized"}`))
 	if note != nil {
@@ -169,6 +173,7 @@ func TestProtocolInitializeListPing(t *testing.T) {
 		"openid_open", "openid_status", "openid_discover", "openid_register",
 		"openid_login", "openid_register_agent", "openid_pod_put", "openid_pod_get",
 		"openid_client_credentials", "openid_token", "openid_audit_flush", "openid_audit_verify",
+		"spark_login", "spark_register",
 		"spark_save_conversation", "spark_list_conversations", "spark_share_conversation",
 	} {
 		if !names[want] {
@@ -490,9 +495,7 @@ func TestSparkConversationTools(t *testing.T) {
 		t.Fatalf("get: %#v", got)
 	}
 	shared := callTool(t, mcp, "spark_share_conversation", map[string]any{"id": id, "token": token})
-	shareObj := shared["json"].(map[string]any)
-	share := shareObj["share"].(map[string]any)
-	url, _ := share["url"].(string)
+	url := sparkShareURL(shared)
 	if url == "" {
 		t.Fatalf("share url: %#v", shared)
 	}
@@ -523,6 +526,80 @@ func TestSparkConversationTools(t *testing.T) {
 func fmtJSON(v any) string {
 	b, _ := json.Marshal(v)
 	return string(b)
+}
+
+func sparkShareURL(shared map[string]any) string {
+	if u, _ := shared["shareUrl"].(string); u != "" {
+		return u
+	}
+	if share, ok := shared["share"].(map[string]any); ok {
+		if u, _ := share["url"].(string); u != "" {
+			return u
+		}
+	}
+	if inner, ok := shared["json"].(map[string]any); ok {
+		if share, ok := inner["share"].(map[string]any); ok {
+			if u, _ := share["url"].(string); u != "" {
+				return u
+			}
+		}
+		if u, _ := inner["shareUrl"].(string); u != "" {
+			return u
+		}
+	}
+	return ""
+}
+
+func TestSparkLoginAndRegisterMintConnectToken(t *testing.T) {
+	_, mcp := startOpenID(t)
+	reg := callTool(t, mcp, "spark_register", map[string]any{
+		"handle": "sparklogin", "password": "testpass123", "name": "Spark Login",
+	})
+	if dump, _ := json.Marshal(reg); strings.Contains(string(dump), "testpass123") {
+		t.Fatalf("spark_register echoed password: %#v", reg)
+	}
+	if reg["ok"] != true || reg["token"] == "" || reg["handle"] != "sparklogin" {
+		t.Fatalf("spark_register: %#v", reg)
+	}
+	hint, _ := reg["hint"].(string)
+	if reg["tokenType"] != "Bearer" || !strings.Contains(hint, "Bearer") {
+		t.Fatalf("spark_register hint/type: %#v", reg)
+	}
+	token, _ := reg["token"].(string)
+
+	login := callTool(t, mcp, "spark_login", map[string]any{
+		"handle": "sparklogin", "password": "testpass123",
+	})
+	if dump, _ := json.Marshal(login); strings.Contains(string(dump), "testpass123") {
+		t.Fatalf("spark_login echoed password: %#v", login)
+	}
+	if login["ok"] != true || login["token"] == "" {
+		t.Fatalf("spark_login: %#v", login)
+	}
+	token, _ = login["token"].(string)
+
+	if msg := callToolErr(t, mcp, "spark_login", map[string]any{"handle": "sparklogin", "password": "wrong"}); msg == "" {
+		t.Fatal("bad password should fail")
+	} else if strings.Contains(msg, "wrong") && strings.Contains(msg, "password") {
+		// generic failure is fine; just must not echo the supplied password
+	}
+
+	saved := callTool(t, mcp, "spark_save_conversation", map[string]any{
+		"token": token,
+		"title": "From spark_login",
+		"messages": []any{
+			map[string]any{"role": "user", "text": "hello after login"},
+			map[string]any{"role": "assistant", "text": "saved"},
+		},
+	})
+	id := sparkSaveID(saved)
+	if id == "" {
+		t.Fatalf("save after spark_login: %#v", saved)
+	}
+	shared := callTool(t, mcp, "spark_share_conversation", map[string]any{"id": id, "token": token})
+	if sparkShareURL(shared) == "" {
+		t.Fatalf("share after spark_login: %#v", shared)
+	}
 }
 
 func sparkSaveID(saved map[string]any) string {

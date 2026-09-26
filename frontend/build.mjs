@@ -58,6 +58,8 @@ const vercel = {
     { source: "/records", destination: "/records.html" },
     { source: "/records/", destination: "/records.html" },
     { source: "/login", destination: "/dash.html" },
+    { source: "/reset", destination: "/reset.html" },
+    { source: "/reset/", destination: "/reset.html" },
     { source: "/idp/spark-token", destination: "/api/spark-token" },
     { source: "/idp/spark-token/", destination: "/api/spark-token" },
     { source: "/idp/:path*", destination: `${pod}/idp/:path*` },

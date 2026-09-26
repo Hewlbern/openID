@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>oid — Reset password</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="/static/dash.css" />
+  <script src="/static/config.js"></script>
+</head>
+<body>
+  <div class="home">
+    <header class="bar">
+      <a class="brand" href="/">
+        <span class="mark" aria-hidden="true"></span>
+        <span>oid <small>Reset password</small></span>
+      </a>
+    </header>
+    <main class="stage">
+      <h1>Choose a new password</h1>
+      <p class="sub">This link works once. After you save, sign in with the new password.</p>
+      <form id="resetForm" class="auth-form">
+        <label>
+          New password
+          <span class="pw">
+            <input name="password" type="password" required minlength="8" maxlength="128" autocomplete="new-password" />
+            <button type="button" class="reveal" data-reveal aria-label="Show password">Show</button>
+          </span>
+        </label>
+        <label>
+          Confirm password
+          <input name="confirm" type="password" required minlength="8" maxlength="128" autocomplete="new-password" />
+        </label>
+        <p class="auth-msg" id="resetMsg" role="status"></p>
+        <button class="btn wide" type="submit" id="resetBtn">Save password</button>
+      </form>
+      <p class="hint" id="done" hidden><a href="/login">Sign in</a></p>
+    </main>
+  </div>
+  <script src="/static/reset.js"></script>
+</body>
+</html>

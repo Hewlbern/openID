@@ -7,10 +7,14 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
+
+	"solid-go/internal/logging"
 
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
@@ -35,18 +39,30 @@ type Service struct {
 	byHandle  map[string]*Account
 	byID      map[string]*Account
 	clients   map[string]*ClientCredentials
-	sessions  map[string]string // cookie -> accountID
+	sessions  map[string]string      // cookie -> accountID
 	spark     map[string]*sparkGrant // jti -> grant
+	resets    map[string]*resetRecord
+	limiter   hitLimiter
+	mail      mailSender
 	persistOK bool
+
+	// AdminSecret authorizes operator recovery (OPENID_ADMIN_RESET_SECRET).
+	// Empty disables those routes (they respond 404).
+	AdminSecret string
+	// PublicURL is the site origin used in reset links (OPENID_PUBLIC_URL).
+	PublicURL string
+	Logger    logging.Logger
 }
 
 type Account struct {
-	ID           string    `json:"id"`
-	Handle       string    `json:"handle"`
-	Email        string    `json:"email,omitempty"`
-	Name         string    `json:"name,omitempty"`
-	Bio          string    `json:"bio,omitempty"`
-	PasswordHash string    `json:"-"`
+	ID           string `json:"id"`
+	Handle       string `json:"handle"`
+	Email        string `json:"email,omitempty"`
+	Name         string `json:"name,omitempty"`
+	Bio          string `json:"bio,omitempty"`
+	PasswordHash string `json:"-"`
+	// TokenVersion invalidates bearer tokens minted before a password reset.
+	TokenVersion int       `json:"-"`
 	WebID        string    `json:"webId"`
 	PodPath      string    `json:"podPath"`
 	PublicURL    string    `json:"publicUrl,omitempty"`
@@ -63,19 +79,24 @@ type ClientCredentials struct {
 
 func New(store *resourcestore.Store, tokens *authn.TokenService, baseURL string) *Service {
 	s := &Service{
-		Store:     store,
-		Tokens:    tokens,
-		BaseURL:   strings.TrimRight(baseURL, "/"),
-		accounts:  map[string]*Account{},
-		byHandle:  map[string]*Account{},
-		byID:      map[string]*Account{},
-		clients:   map[string]*ClientCredentials{},
-		sessions:  map[string]string{},
-		spark:     map[string]*sparkGrant{},
-		persistOK: true,
+		Store:       store,
+		Tokens:      tokens,
+		BaseURL:     strings.TrimRight(baseURL, "/"),
+		accounts:    map[string]*Account{},
+		byHandle:    map[string]*Account{},
+		byID:        map[string]*Account{},
+		clients:     map[string]*ClientCredentials{},
+		sessions:    map[string]string{},
+		spark:       map[string]*sparkGrant{},
+		resets:      map[string]*resetRecord{},
+		mail:        newMailerFromEnv(),
+		persistOK:   true,
+		AdminSecret: strings.TrimSpace(os.Getenv("OPENID_ADMIN_RESET_SECRET")),
+		PublicURL:   strings.TrimRight(os.Getenv("OPENID_PUBLIC_URL"), "/"),
 	}
 	s.load()
 	s.loadSparkGrants()
+	s.loadResets()
 	return s
 }
 
@@ -191,6 +212,14 @@ func (s *Service) handleIDP(w http.ResponseWriter, r *http.Request) {
 		s.createClientCredentials(w, r)
 	case path == "replica/adopt" && r.Method == http.MethodPost:
 		s.adoptReplica(w, r)
+	case path == "password/forgot" && r.Method == http.MethodPost:
+		s.forgotPassword(w, r)
+	case path == "password/reset" && r.Method == http.MethodPost:
+		s.resetPassword(w, r)
+	case path == "password/admin-reset" && r.Method == http.MethodPost:
+		s.adminReset(w, r)
+	case path == "admin/revoke-clients" && r.Method == http.MethodPost:
+		s.adminRevokeClients(w, r)
 	case path == "auth" && r.Method == http.MethodGet:
 		// simplified authorize: redirect with code
 		s.authorize(w, r)
@@ -208,6 +237,8 @@ func (s *Service) handleIDP(w http.ResponseWriter, r *http.Request) {
 				"createPod":         s.BaseURL + "/idp/pods",
 				"clientCredentials": s.BaseURL + "/idp/client-credentials",
 				"sparkToken":        s.BaseURL + "/idp/spark-token",
+				"passwordForgot":    s.BaseURL + "/idp/password/forgot",
+				"passwordReset":     s.BaseURL + "/idp/password/reset",
 			},
 			"version": "solid-go/1.0",
 		})
@@ -228,7 +259,7 @@ var reservedHandles = map[string]bool{
 	"oauth": true, "health": true, "app": true, "i": true, "static": true,
 	"api": true, "admin": true, "www": true, "well-known": true,
 	"welcome": true, "dashboard": true, "login": true, "mcp": true, "records": true,
-	"share": true, "conversations": true,
+	"share": true, "conversations": true, "reset": true, "password": true,
 }
 
 func (s *Service) handleAvailability(w http.ResponseWriter, handle string) {
@@ -308,7 +339,6 @@ func (s *Service) register(w http.ResponseWriter, r *http.Request) {
 	sid := uuid.NewString()
 	s.sessions[sid] = acc.ID
 	http.SetCookie(w, sessionCookie(r, sid, int(passwordSessionTTL.Seconds())))
-	s.saveLocalAuth(acc.Handle, req.Password)
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"account": acc,
@@ -451,7 +481,6 @@ func (s *Service) login(w http.ResponseWriter, r *http.Request) {
 	s.sessions[sid] = acc.ID
 	s.mu.Unlock()
 	http.SetCookie(w, sessionCookie(r, sid, int(passwordSessionTTL.Seconds())))
-	s.saveLocalAuth(acc.Handle, req.Password)
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{"token": token, "webId": acc.WebID, "account": acc})
 }
@@ -477,12 +506,16 @@ func (s *Service) accountFromRequest(r *http.Request) *Account {
 		}
 	}
 	creds, err := s.Tokens.Extract(r)
-	if err != nil || creds.WebID == "" {
+	if err != nil || creds == nil || creds.WebID == "" {
 		return nil
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.accountByWebID(creds.WebID)
+	acc := s.accountByWebID(creds.WebID)
+	if acc == nil {
+		return nil
+	}
+	return acc
 }
 
 func (s *Service) indexAccount(acc *Account) {
@@ -601,17 +634,6 @@ func (s *Service) adoptReplica(w http.ResponseWriter, r *http.Request) {
 func (s *Service) me(w http.ResponseWriter, r *http.Request) {
 	acc := s.accountFromRequest(r)
 	if acc == nil {
-		// try bearer
-		creds, err := s.Tokens.Extract(r)
-		if err != nil || creds.WebID == "" {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-		s.mu.RLock()
-		acc = s.accountByWebID(creds.WebID)
-		s.mu.RUnlock()
-	}
-	if acc == nil {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -635,37 +657,90 @@ func (s *Service) updateProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Name     string `json:"name"`
-		Bio      string `json:"bio"`
-		Password string `json:"password"`
+		Name            string  `json:"name"`
+		Bio             string  `json:"bio"`
+		Email           *string `json:"email"`
+		Password        string  `json:"password"`
+		CurrentPassword string  `json:"currentPassword"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&body); err != nil {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
-	if body.Password != "" && len(body.Password) < 8 {
+	if body.Password != "" && !passwordOK(body.Password) {
 		http.Error(w, "password must be at least 8 characters", http.StatusBadRequest)
 		return
 	}
+	var newEmail string
+	if body.Email != nil {
+		var ok bool
+		newEmail, ok = normalizeEmail(*body.Email)
+		if !ok {
+			http.Error(w, "invalid email", http.StatusBadRequest)
+			return
+		}
+	}
+	changingSecret := body.Password != "" || body.Email != nil
+	if changingSecret {
+		s.mu.RLock()
+		hash := acc.PasswordHash
+		s.mu.RUnlock()
+		if bcrypt.CompareHashAndPassword([]byte(hash), []byte(body.CurrentPassword)) != nil {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+	}
+	var newHash []byte
+	if body.Password != "" {
+		var err error
+		newHash, err = bcrypt.GenerateFromPassword([]byte(body.Password), bcrypt.DefaultCost)
+		if err != nil {
+			http.Error(w, "could not update password", http.StatusInternalServerError)
+			return
+		}
+	}
 	s.mu.Lock()
+	if changingSecret && bcrypt.CompareHashAndPassword([]byte(acc.PasswordHash), []byte(body.CurrentPassword)) != nil {
+		s.mu.Unlock()
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
 	if body.Name != "" {
 		acc.Name = body.Name
 	}
 	if body.Bio != "" {
 		acc.Bio = body.Bio
 	}
-	if body.Password != "" {
-		hash, err := bcrypt.GenerateFromPassword([]byte(body.Password), bcrypt.DefaultCost)
-		if err != nil {
+	if body.Email != nil {
+		if err := s.reindexEmailLocked(acc, newEmail); err != nil {
 			s.mu.Unlock()
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			http.Error(w, "email already in use", http.StatusConflict)
 			return
 		}
-		acc.PasswordHash = string(hash)
+	}
+	passwordChanged := false
+	if body.Password != "" {
+		acc.PasswordHash = string(newHash)
+		s.invalidateAuthLocked(acc)
+		passwordChanged = true
 	}
 	s.saveLocked()
 	s.mu.Unlock()
 	_ = s.provisionPod(r.Context(), acc, acc.Name)
+	if passwordChanged {
+		token, _ := s.Tokens.Issue(acc.WebID, "", passwordSessionTTL)
+		sid := uuid.NewString()
+		s.mu.Lock()
+		s.sessions[sid] = acc.ID
+		s.mu.Unlock()
+		http.SetCookie(w, sessionCookie(r, sid, int(passwordSessionTTL.Seconds())))
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(struct {
+			*Account
+			Token string `json:"token,omitempty"`
+		}{Account: acc, Token: token})
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(acc)
 }
@@ -693,16 +768,6 @@ func (s *Service) createPod(w http.ResponseWriter, r *http.Request) {
 
 func (s *Service) createClientCredentials(w http.ResponseWriter, r *http.Request) {
 	acc := s.accountFromRequest(r)
-	if acc == nil {
-		creds, err := s.Tokens.Extract(r)
-		if err != nil || creds.WebID == "" {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-		s.mu.RLock()
-		acc = s.accountByWebID(creds.WebID)
-		s.mu.RUnlock()
-	}
 	if acc == nil {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
@@ -824,6 +889,7 @@ type persistedAccount struct {
 	Name         string    `json:"name"`
 	Bio          string    `json:"bio"`
 	PasswordHash string    `json:"passwordHash"`
+	TokenVersion int       `json:"tokenVersion,omitempty"`
 	WebID        string    `json:"webId"`
 	PodPath      string    `json:"podPath"`
 	PublicURL    string    `json:"publicUrl"`
@@ -844,10 +910,14 @@ func (s *Service) load() {
 	for _, p := range st.Accounts {
 		acc := &Account{
 			ID: p.ID, Handle: p.Handle, Email: p.Email, Name: p.Name, Bio: p.Bio,
-			PasswordHash: p.PasswordHash, WebID: p.WebID, PodPath: p.PodPath,
+			PasswordHash: p.PasswordHash, TokenVersion: p.TokenVersion,
+			WebID: p.WebID, PodPath: p.PodPath,
 			PublicURL: p.PublicURL, Created: p.Created,
 		}
 		s.indexAccount(acc)
+		if p.TokenVersion > 0 && s.Tokens != nil {
+			s.Tokens.SetTokenVersion(acc.WebID, p.TokenVersion)
+		}
 	}
 	for _, c := range st.Clients {
 		if c != nil && c.ID != "" {
@@ -869,7 +939,8 @@ func (s *Service) saveLocked() {
 		seen[a.ID] = true
 		st.Accounts = append(st.Accounts, persistedAccount{
 			ID: a.ID, Handle: a.Handle, Email: a.Email, Name: a.Name, Bio: a.Bio,
-			PasswordHash: a.PasswordHash, WebID: a.WebID, PodPath: a.PodPath,
+			PasswordHash: a.PasswordHash, TokenVersion: a.TokenVersion,
+			WebID: a.WebID, PodPath: a.PodPath,
 			PublicURL: a.PublicURL, Created: a.Created,
 		})
 	}
@@ -881,25 +952,6 @@ func (s *Service) saveLocked() {
 		return
 	}
 	_, _ = s.Store.Put(context.Background(), ".openid/accounts.json", "application/json", raw, "", "")
-}
-
-func (s *Service) saveLocalAuth(handle, password string) {
-	if handle == "" || password == "" {
-		return
-	}
-	peer := s.BaseURL
-	if !strings.Contains(peer, "railway.app") {
-		peer = "https://pod-production-ebe1.up.railway.app"
-	}
-	raw, err := json.MarshalIndent(map[string]string{
-		"handle":   handle,
-		"password": password,
-		"peer":     peer,
-	}, "", "  ")
-	if err != nil {
-		return
-	}
-	_, _ = s.Store.Put(context.Background(), ".openid/local-auth.json", "application/json", raw, "", "")
 }
 
 func randomHex(n int) string {

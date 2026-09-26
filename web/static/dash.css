@@ -141,6 +141,17 @@ body:not(.in) .face { background: #111; }
   font-size: 12px;
   font-weight: 550;
 }
+.text-btn {
+  border: 0;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  padding: 0;
+  text-align: left;
+}
+.text-btn:hover { color: var(--ink); }
 .auth-msg { min-height: 18px; margin: 0; font-size: 13px; color: var(--copy); }
 .auth-msg.bad { color: var(--bad); }
 .auth-msg.ok { color: var(--ok); }

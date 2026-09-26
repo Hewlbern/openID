@@ -11,6 +11,7 @@ document.querySelectorAll("[data-prefix]").forEach((el) => { el.textContent = ho
 const claimModal = document.getElementById("claimModal");
 const registerForm = document.getElementById("registerForm");
 const loginForm = document.getElementById("loginForm");
+const forgotForm = document.getElementById("forgotForm");
 const claimForm = document.getElementById("claimForm");
 const modalHandle = document.getElementById("modalHandle");
 const loginBtn = document.getElementById("loginBtn");
@@ -24,12 +25,31 @@ function field(form, name) {
 function showLogin(on) {
   if (claimForm) claimForm.hidden = on;
   if (loginForm) loginForm.hidden = !on;
+  if (forgotForm) forgotForm.hidden = true;
   if (loginBtn) loginBtn.hidden = on;
   if (signupBtn) signupBtn.hidden = !on;
+  const forgotBtn = document.getElementById("forgotBtn");
+  const forgotBack = document.getElementById("forgotBack");
+  if (forgotBtn) forgotBtn.hidden = !on;
+  if (forgotBack) forgotBack.hidden = true;
   const lead = document.getElementById("gateLead");
   if (lead) lead.textContent = on ? "Sign in. Then take Spark into your Solid pod." : "Claim a handle. Then take Spark into your Solid pod.";
   const first = on ? field(loginForm, "handle") : document.getElementById("handle");
   if (first) first.focus();
+}
+
+function showForgot() {
+  showLogin(true);
+  if (loginForm) loginForm.hidden = true;
+  if (forgotForm) forgotForm.hidden = false;
+  const forgotBtn = document.getElementById("forgotBtn");
+  const forgotBack = document.getElementById("forgotBack");
+  if (forgotBtn) forgotBtn.hidden = true;
+  if (forgotBack) forgotBack.hidden = false;
+  const lead = document.getElementById("gateLead");
+  if (lead) lead.textContent = "We email a one-time link when the account has a real inbox.";
+  const id = field(forgotForm, "id");
+  if (id) id.focus();
 }
 
 async function checkHandle(value, statusEl, btn) {
@@ -79,6 +99,10 @@ bindClaim("claimForm", "handle", "claimBtn", "claimStatus");
 
 if (loginBtn) loginBtn.addEventListener("click", () => showLogin(true));
 if (signupBtn) signupBtn.addEventListener("click", () => showLogin(false));
+const forgotBtn = document.getElementById("forgotBtn");
+const forgotBack = document.getElementById("forgotBack");
+if (forgotBtn) forgotBtn.addEventListener("click", () => showForgot());
+if (forgotBack) forgotBack.addEventListener("click", () => showLogin(true));
 if (claimModal) {
   claimModal.addEventListener("click", (e) => {
     if (e.target === claimModal) claimModal.classList.remove("open");
@@ -132,6 +156,29 @@ loginForm.addEventListener("submit", async (e) => {
   if (handle && !handle.includes("@")) localStorage.setItem("openid.handle", handle);
   location.href = "/app";
 });
+
+if (forgotForm) {
+  forgotForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const status = document.getElementById("claimStatus");
+    const id = (field(forgotForm, "id").value || "").trim();
+    status.className = "status";
+    status.textContent = "Sending…";
+    try {
+      const res = await openidFetch("/idp/password/forgot", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(id.includes("@") ? { email: id } : { handle: id }),
+      });
+      const data = await res.json().catch(() => ({}));
+      status.className = res.status === 429 ? "status bad" : "status ok";
+      status.textContent = data.message || "If an account with a deliverable email matches, a reset link is on its way.";
+    } catch (err) {
+      status.className = "status bad";
+      status.textContent = "Could not reach the pod.";
+    }
+  });
+}
 
 const apiStatus = document.getElementById("apiStatus");
 if (apiStatus) {

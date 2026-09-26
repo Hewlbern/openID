@@ -25,20 +25,12 @@ func main() {
 	skipAdopt := flag.Bool("skip-adopt", false, "Only push pod files (no account merge)")
 	flag.Parse()
 
-	if h, p, peerFile, err := loadLocalAuth(*storagePath); err == nil {
-		if *handle == "mike" && h != "" {
-			*handle = h
-		}
-		if *password == "" {
-			*password = p
-		}
-		if *peer == "" {
-			*peer = peerFile
-		}
+	if removed := discardPlaintextAuth(*storagePath); removed {
+		fmt.Fprintln(os.Stderr, "removed plaintext .openid/local-auth.json; set SOLID_SYNC_PASSWORD instead")
 	}
 	if *peer == "" || *password == "" {
 		fmt.Fprintln(os.Stderr, "usage: sync -peer https://pod.example -handle mike -password …")
-		fmt.Fprintln(os.Stderr, "or sign in locally once so ./data/.openid/local-auth.json exists")
+		fmt.Fprintln(os.Stderr, "set SOLID_SYNC_PEER, SOLID_SYNC_HANDLE, and SOLID_SYNC_PASSWORD")
 		os.Exit(2)
 	}
 
@@ -126,20 +118,18 @@ func runOnce(ctx context.Context, storagePath, peer, handle, password string, re
 	return nil
 }
 
-func loadLocalAuth(storagePath string) (handle, password, peer string, err error) {
-	raw, err := os.ReadFile(filepath.Join(storagePath, ".openid", "local-auth.json"))
-	if err != nil {
-		return "", "", "", err
+// discardPlaintextAuth deletes a legacy local-auth.json without reading the
+// password into the process output. Returns whether a file was removed.
+func discardPlaintextAuth(storagePath string) bool {
+	base := filepath.Join(storagePath, ".openid")
+	removed := false
+	for _, name := range []string{"local-auth.json", "local-auth.json.meta.json"} {
+		p := filepath.Join(base, name)
+		if err := os.Remove(p); err == nil {
+			removed = true
+		}
 	}
-	var auth struct {
-		Handle   string `json:"handle"`
-		Password string `json:"password"`
-		Peer     string `json:"peer"`
-	}
-	if err := json.Unmarshal(raw, &auth); err != nil {
-		return "", "", "", err
-	}
-	return auth.Handle, auth.Password, auth.Peer, nil
+	return removed
 }
 
 func loadState(path string) (*replica.StateFile, error) {

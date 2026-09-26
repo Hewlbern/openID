@@ -24,17 +24,21 @@ type NotifyHook func(path, activity string)
 
 // LDPHandler serves Solid LDP HTTP operations.
 type LDPHandler struct {
-	Store   *resourcestore.Store
-	WAC     *wac.Checker
-	Tokens  *authn.TokenService
-	BaseURL string
-	Logger  logging.Logger
-	OnAudit AuditHook
+	Store    *resourcestore.Store
+	WAC      *wac.Checker
+	Tokens   *authn.TokenService
+	BaseURL  string
+	Logger   logging.Logger
+	OnAudit  AuditHook
 	OnNotify NotifyHook
 }
 
 func (h *LDPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	path := strings.TrimPrefix(r.URL.Path, "/")
+	path := CleanResourcePath(r.URL.Path)
+	if IsInternalServerPath(path) {
+		http.NotFound(w, r)
+		return
+	}
 	creds, err := h.Tokens.Extract(r)
 	if err != nil {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
@@ -178,6 +182,9 @@ func (h *LDPHandler) containerTurtle(path string, res *resourcestore.Resource) [
 	g.AddIRI(subj, "http://www.w3.org/1999/02/22-rdf-syntax-ns#type", "http://www.w3.org/ns/ldp#BasicContainer")
 	g.AddLiteral(subj, "http://purl.org/dc/terms/modified", res.Modified.Format(time.RFC3339))
 	for _, c := range children {
+		if IsInternalServerPath(c) {
+			continue
+		}
 		g.AddIRI(subj, "http://www.w3.org/ns/ldp#contains", h.resourceURL(c))
 	}
 	return []byte(rdf.SerializeTurtle(g, prefixes))

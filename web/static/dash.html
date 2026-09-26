@@ -54,6 +54,18 @@
           </label>
           <p class="auth-msg" id="loginMsg" role="status"></p>
           <button class="btn wide" type="submit" id="loginBtn">Continue</button>
+          <button type="button" class="text-btn" id="forgotBtn">Forgot password</button>
+        </form>
+
+        <form id="forgotForm" class="auth-form" hidden>
+          <label>
+            Handle or email
+            <input name="id" required placeholder="mike or you@example.com" autocomplete="username" />
+          </label>
+          <p class="hint">If that account has a real email address, we send a one-time link. It expires in 30 minutes.</p>
+          <p class="auth-msg" id="forgotMsg" role="status"></p>
+          <button class="btn wide" type="submit">Send reset link</button>
+          <button type="button" class="text-btn" id="forgotBack">Back to sign in</button>
         </form>
 
         <form id="registerForm" class="auth-form" hidden autocomplete="on">
@@ -145,6 +157,19 @@
           <h2>Account</h2>
           <p class="mono" id="baseLabel"></p>
           <div class="row wrap" id="sessionActions"></div>
+          <form id="accountForm" class="stack" hidden style="margin-top:16px">
+            <label>Email
+              <input name="email" type="email" autocomplete="email" placeholder="you@example.com" />
+            </label>
+            <label>Current password
+              <input name="currentPassword" type="password" autocomplete="current-password" />
+            </label>
+            <label>New password
+              <input name="password" type="password" minlength="8" autocomplete="new-password" placeholder="leave blank to keep" />
+            </label>
+            <button class="btn ghost" type="submit">Save email and password</button>
+            <p class="msg" id="accountMsg"></p>
+          </form>
         </article>
       </section>
 

@@ -17,3 +17,7 @@ coverage.out
 desktop/node_modules/
 desktop/src-tauri/target/
 .env*.local
+__pycache__/
+*.py[cod]
+/.venv-knowledge/
+/bundles/

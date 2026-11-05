@@ -1,0 +1,28 @@
+name: Knowledge bundles
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  knowledge:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: scripts/requirements-knowledge.txt
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: python -m pip install -r scripts/requirements-knowledge.txt
+      - run: go build -o "$RUNNER_TEMP/openid-test-server" ./cmd/server
+      - run: python -m unittest discover -s test/python -v
+        env:
+          OPENID_TEST_SERVER: ${{ runner.temp }}/openid-test-server

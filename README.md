@@ -117,6 +117,17 @@ curl -s -X POST https://identity-two-plum.vercel.app/api/spark-conversations \
   -d '{"title":"Spark","messages":[{"role":"user","text":"hi","timestamp":"2026-09-01T10:00:00Z"},{"role":"assistant","text":"hello"}]}'
 ```
 
+## Knowledge assets and query evidence
+
+The [knowledge collector](docs/knowledge.md) preserves Markdown, documents, chat
+exports, health datasets and robot files as versioned, private bundles. Each
+bundle contains the original bytes, matching JSON-LD and Turtle metadata, and
+checksums. Query bundles distinguish retrieved sources, actual context and
+citations, with attributed measurements for that particular query. The CLI can
+verify bundles and upload them to an existing pod with an owner-only ACL.
+
+See [setup, commands, data model and limitations](docs/knowledge.md).
+
 ## Hosted deploy
 
 The Solid server is a long-lived Go process with a volume (LDP storage). The marketing / passport UI is on Vercel. Register/login stay same-origin via `/idp` (proxied to the pod). Save, list, share, Spark connect tokens, and MCP run as **Vercel APIs** and talk to the pod with LDP — they do **not** require a Railway redeploy. Browser auth is Bearer in `localStorage` plus an HttpOnly `solid-session` cookie.

@@ -66,6 +66,10 @@ function nl2br(s) {
   return escapeHtml(s).replace(/\n/g, "<br />");
 }
 
+function convoRoot() {
+  return account && account.handle ? account.handle + "/conversations/" : "conversations/";
+}
+
 function sparkDir() {
   return account && account.handle ? account.handle + "/conversations/spark/" : "conversations/spark/";
 }
@@ -87,9 +91,25 @@ function allItems() {
   return spark.concat(recs);
 }
 
+// Fill the source dropdown from what is loaded (gemini-spark, claude-code, codex, ...).
+function renderSourceFilter() {
+  const sel = $("src");
+  if (!sel) return;
+  const counts = {};
+  allItems().forEach((t) => { counts[t.pkg] = (counts[t.pkg] || 0) + 1; });
+  const sources = Object.keys(counts).sort();
+  const current = sel.value;
+  sel.innerHTML = `<option value="">All sources (${allItems().length})</option>` +
+    sources.map((s) => `<option value="${escapeHtml(s)}">${escapeHtml(s)} (${counts[s]})</option>`).join("");
+  sel.value = sources.includes(current) ? current : "";
+  sel.hidden = sources.length < 2;
+}
+
 function visible() {
   const q = ($("q").value || "").toLowerCase().trim();
+  const src = $("src") ? $("src").value : "";
   return allItems().filter((t) => {
+    if (src && t.pkg !== src) return false;
     if (!q) return true;
     const hay = [t.name, t.pkg, t.id].join(" ").toLowerCase();
     return hay.includes(q);
@@ -97,9 +117,10 @@ function visible() {
 }
 
 function renderList() {
+  renderSourceFilter();
   const rows = visible();
   if (!rows.length) {
-    $("list").innerHTML = `<li class="empty">${allItems().length ? "No matches." : "Nothing in conversations/spark/ yet."}</li>`;
+    $("list").innerHTML = `<li class="empty">${allItems().length ? "No matches." : "No saved conversations yet."}</li>`;
     return;
   }
   $("list").innerHTML = rows.slice(0, 400).map((t) => {
@@ -140,7 +161,7 @@ function railwayHonest() {
 function showAccount() {
   if (!account) return;
   const label = $("podPathLabel");
-  if (label) label.textContent = sparkDir();
+  if (label) label.textContent = convoRoot();
   $("detail").innerHTML = `
     ${railwayHonest()}
     <p class="walk-kicker">After login — one place</p>
@@ -672,6 +693,7 @@ $("logout").addEventListener("click", async () => {
 });
 
 $("q").addEventListener("input", renderList);
+if ($("src")) $("src").addEventListener("change", renderList);
 $("meFace").addEventListener("click", goYou);
 $("youBtn").addEventListener("click", goYou);
 
@@ -921,7 +943,7 @@ $("saveForm").addEventListener("submit", async (e) => {
   setStatus(account.handle || "signed in");
   selectedKind = "account";
   const pathLabel = $("podPathLabel");
-  if (pathLabel) pathLabel.textContent = sparkDir();
+  if (pathLabel) pathLabel.textContent = convoRoot();
   await probePod();
   await refresh();
 })();

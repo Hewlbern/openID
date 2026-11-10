@@ -21,9 +21,13 @@ func (s *Service) handleRoot(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.Method {
 	case http.MethodGet:
-		list, err := s.List(r.Context(), actor)
+		list, err := s.List(r.Context(), actor, r.URL.Query().Get("source"))
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			status := http.StatusInternalServerError
+			if errors.Is(err, ErrInvalidSource) {
+				status = http.StatusBadRequest
+			}
+			http.Error(w, err.Error(), status)
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"conversations": list})

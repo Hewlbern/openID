@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"net/http"
 	"path"
+	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -26,7 +28,20 @@ var (
 	ErrUnauthorized = errors.New("unauthorized")
 	ErrNotFound     = errors.New("conversation not found")
 	ErrForbidden    = errors.New("forbidden")
+	ErrInvalidID     = errors.New("invalid conversation id: use 1-128 letters, digits, '-' or '_'")
+	ErrInvalidSource = errors.New("invalid source: use 1-40 lowercase letters, digits or '-'")
+
+	// IDs and sources become path segments in the pod, so they must never
+	// contain '/', '.', or anything else that could escape the container.
+	idRE     = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$`)
+	sourceRE = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,39}$`)
 )
+
+// ValidID reports whether id is safe to use as a conversation file name.
+func ValidID(id string) bool { return idRE.MatchString(id) }
+
+// ValidSource reports whether source is safe to use as a container name.
+func ValidSource(source string) bool { return sourceRE.MatchString(source) }
 
 // AuditHook is called after each mutating Solid write.
 type AuditHook func(ctx context.Context, agentWebID, method, path string, body []byte)
@@ -84,20 +99,49 @@ func (s *Service) resourceURL(p string) string {
 	return s.BaseURL + "/" + p
 }
 
+func (s *Service) rootDir(podPath string) string {
+	return strings.TrimSuffix(podPath, "/") + "/" + ConversationsDir
+}
+
 func (s *Service) sparkDir(podPath string) string {
 	return strings.TrimSuffix(podPath, "/") + "/" + SparkDir
 }
 
-func (s *Service) convoPath(podPath, id string) string {
-	return s.sparkDir(podPath) + id + ".json"
+// sourceDir is the container for one source. Gemini Spark (and an empty
+// source) stay in conversations/spark/ so existing saves, the Vercel APIs and
+// MCP keep working; every other source gets conversations/{source}/.
+func (s *Service) sourceDir(podPath, source string) string {
+	if source == "" || source == SourceGeminiSpark {
+		return s.sparkDir(podPath)
+	}
+	return s.rootDir(podPath) + source + "/"
 }
 
-func (s *Service) metaPath(podPath, id string) string {
-	return s.sparkDir(podPath) + id + ".ttl"
+// dirOf returns the container that holds a conversation resource.
+func dirOf(resource string) string {
+	return path.Dir(resource) + "/"
 }
 
-func (s *Service) shareMetaPath(podPath, id string) string {
-	return s.sparkDir(podPath) + id + ".share.json"
+func convoPath(dir, id string) string     { return dir + id + ".json" }
+func metaPath(dir, id string) string      { return dir + id + ".ttl" }
+func shareMetaPath(dir, id string) string { return dir + id + ".share.json" }
+
+// sourceDirs lists every per-source container under conversations/, spark first.
+func (s *Service) sourceDirs(ctx context.Context, podPath string) []string {
+	spark := s.sparkDir(podPath)
+	dirs := []string{spark}
+	children, err := s.Store.List(ctx, s.rootDir(podPath))
+	if err != nil {
+		return dirs
+	}
+	for _, child := range children {
+		child = strings.TrimPrefix(child, "/")
+		if !strings.HasSuffix(child, "/") || child == spark {
+			continue
+		}
+		dirs = append(dirs, child)
+	}
+	return dirs
 }
 
 func (s *Service) fire(ctx context.Context, agent, method, path string, body []byte) {
@@ -122,18 +166,17 @@ func (s *Service) deleteAudited(ctx context.Context, actor *actor, path string) 
 	return nil
 }
 
-func (s *Service) ensurePrivateContainer(ctx context.Context, actor *actor) error {
-	dir := s.sparkDir(actor.PodPath)
+func (s *Service) ensurePrivateContainer(ctx context.Context, actor *actor, dir string) error {
 	if err := s.Store.EnsureContainer(ctx, dir); err != nil {
 		return err
 	}
-	parent := strings.TrimSuffix(actor.PodPath, "/") + "/conversations/"
+	parent := s.rootDir(actor.PodPath)
 	acl := wac.OwnerOnlyACL(s.resourceURL(parent), actor.WebID)
 	if err := s.putAudited(ctx, actor, strings.TrimSuffix(parent, "/")+"/.acl", "text/turtle", []byte(acl)); err != nil {
 		return err
 	}
-	sparkACL := wac.OwnerOnlyACL(s.resourceURL(dir), actor.WebID)
-	return s.putAudited(ctx, actor, strings.TrimSuffix(dir, "/")+"/.acl", "text/turtle", []byte(sparkACL))
+	dirACL := wac.OwnerOnlyACL(s.resourceURL(dir), actor.WebID)
+	return s.putAudited(ctx, actor, strings.TrimSuffix(dir, "/")+"/.acl", "text/turtle", []byte(dirACL))
 }
 
 func (s *Service) writeOwnerACL(ctx context.Context, actor *actor, resource string) error {
@@ -183,7 +226,7 @@ func (s *Service) metadataTurtle(c *Conversation) string {
 		role := normalizeRole(m.Role)
 		g.AddLiteral(msgID, "https://schema.org/author", role)
 		if role == "assistant" {
-			g.AddLiteral(msgID, "http://xmlns.com/foaf/0.1/Agent", "gemini-spark")
+			g.AddLiteral(msgID, "http://xmlns.com/foaf/0.1/Agent", firstNonEmpty(c.Source, SourceGeminiSpark))
 		} else if c.Owner != "" {
 			g.AddIRI(msgID, "http://xmlns.com/foaf/0.1/maker", c.Owner)
 		}
@@ -204,7 +247,7 @@ func (s *Service) decorate(c *Conversation) {
 	c.Creator = c.Owner
 	c.DateCreated = c.Created.UTC().Format(time.RFC3339)
 	c.DateModified = c.Updated.UTC().Format(time.RFC3339)
-	c.MetaTTL = s.resourceURL(s.metaPath(c.PodPath, c.ID))
+	c.MetaTTL = s.resourceURL(metaPath(dirOf(c.Resource), c.ID))
 	for i := range c.Messages {
 		if c.Messages[i].Text == "" && c.Messages[i].Content != "" {
 			c.Messages[i].Text = c.Messages[i].Content
@@ -266,6 +309,14 @@ func (s *Service) Save(ctx context.Context, actor *actor, in SaveInput) (*Conver
 	if actor == nil || actor.WebID == "" || actor.PodPath == "" {
 		return nil, ErrUnauthorized
 	}
+	in.ID = strings.TrimSpace(in.ID)
+	if in.ID != "" && !ValidID(in.ID) {
+		return nil, ErrInvalidID
+	}
+	in.Source = strings.TrimSpace(in.Source)
+	if in.Source != "" && !ValidSource(in.Source) {
+		return nil, ErrInvalidSource
+	}
 	var parsed *Conversation
 	var err error
 	text := strings.TrimSpace(in.Text)
@@ -306,21 +357,28 @@ func (s *Service) Save(ctx context.Context, actor *actor, in SaveInput) (*Conver
 		return nil, fmt.Errorf("messages required")
 	}
 
-	id := strings.TrimSpace(in.ID)
+	id := in.ID
 	if id == "" {
 		id = uuid.NewString()
 	}
+	source := firstNonEmpty(in.Source, parsed.Source, SourceGeminiSpark)
+	if !ValidSource(source) {
+		return nil, ErrInvalidSource
+	}
 	now := time.Now().UTC()
 	created := now
-	resource := s.convoPath(actor.PodPath, id)
+	dir := s.sourceDir(actor.PodPath, source)
 	if existing, err := s.load(ctx, actor, id); err == nil && existing != nil {
 		created = existing.Created
+		// An id is unique across sources: re-saving updates it in place.
+		dir = dirOf(existing.Resource)
 	}
+	resource := convoPath(dir, id)
 
 	c := &Conversation{
 		ID:        id,
 		Title:     firstNonEmpty(in.Title, parsed.Title, titleFromMessages(parsed.Messages)),
-		Source:    firstNonEmpty(in.Source, parsed.Source, SourceGeminiSpark),
+		Source:    source,
 		SourceURL: firstNonEmpty(in.SourceURL, parsed.SourceURL),
 		Created:   created,
 		Updated:   now,
@@ -329,7 +387,7 @@ func (s *Service) Save(ctx context.Context, actor *actor, in SaveInput) (*Conver
 		PodPath:   actor.PodPath,
 		Resource:  resource,
 	}
-	if err := s.ensurePrivateContainer(ctx, actor); err != nil {
+	if err := s.ensurePrivateContainer(ctx, actor, dir); err != nil {
 		return nil, err
 	}
 	s.decorate(c)
@@ -341,7 +399,7 @@ func (s *Service) Save(ctx context.Context, actor *actor, in SaveInput) (*Conver
 		return nil, err
 	}
 	ttl := []byte(s.metadataTurtle(c))
-	if err := s.putAudited(ctx, actor, s.metaPath(actor.PodPath, id), "text/turtle", ttl); err != nil {
+	if err := s.putAudited(ctx, actor, metaPath(dir, id), "text/turtle", ttl); err != nil {
 		return nil, err
 	}
 	if err := s.writeOwnerACL(ctx, actor, resource); err != nil {
@@ -352,7 +410,22 @@ func (s *Service) Save(ctx context.Context, actor *actor, in SaveInput) (*Conver
 }
 
 func (s *Service) load(ctx context.Context, actor *actor, id string) (*Conversation, error) {
-	res, err := s.Store.Get(ctx, s.convoPath(actor.PodPath, id))
+	if !ValidID(id) {
+		return nil, ErrNotFound
+	}
+	for _, dir := range s.sourceDirs(ctx, actor.PodPath) {
+		c, err := s.loadFrom(ctx, actor, dir, id)
+		if errors.Is(err, ErrNotFound) {
+			continue
+		}
+		return c, err
+	}
+	return nil, ErrNotFound
+}
+
+func (s *Service) loadFrom(ctx context.Context, actor *actor, dir, id string) (*Conversation, error) {
+	resource := convoPath(dir, id)
+	res, err := s.Store.Get(ctx, resource)
 	if err != nil {
 		if errors.Is(err, resourcestore.ErrNotFound) {
 			return nil, ErrNotFound
@@ -363,7 +436,7 @@ func (s *Service) load(ctx context.Context, actor *actor, id string) (*Conversat
 	if err := json.Unmarshal(res.Body, &c); err != nil {
 		return nil, err
 	}
-	c.Resource = s.convoPath(actor.PodPath, id)
+	c.Resource = resource
 	c.PodPath = actor.PodPath
 	c.Owner = actor.WebID
 	s.decorate(&c)
@@ -377,31 +450,45 @@ func (s *Service) Get(ctx context.Context, actor *actor, id string) (*Conversati
 	return s.load(ctx, actor, id)
 }
 
-func (s *Service) List(ctx context.Context, actor *actor) ([]*Conversation, error) {
+// List returns conversations from every source container, newest first.
+// A non-empty source limits the result to that source.
+func (s *Service) List(ctx context.Context, actor *actor, source string) ([]*Conversation, error) {
 	if actor == nil {
 		return nil, ErrUnauthorized
 	}
-	dir := s.sparkDir(actor.PodPath)
-	children, err := s.Store.List(ctx, dir)
-	if err != nil {
-		if errors.Is(err, resourcestore.ErrNotFound) {
-			return []*Conversation{}, nil
+	dirs := s.sourceDirs(ctx, actor.PodPath)
+	if source != "" {
+		if !ValidSource(source) {
+			return nil, ErrInvalidSource
 		}
-		return nil, err
+		dirs = []string{s.sourceDir(actor.PodPath, source)}
 	}
-	var out []*Conversation
-	for _, child := range children {
-		base := path.Base(child)
-		if !strings.HasSuffix(base, ".json") || strings.HasSuffix(base, ".share.json") {
-			continue
-		}
-		id := strings.TrimSuffix(base, ".json")
-		c, err := s.load(ctx, actor, id)
+	out := []*Conversation{}
+	for _, dir := range dirs {
+		children, err := s.Store.List(ctx, dir)
 		if err != nil {
-			continue
+			if errors.Is(err, resourcestore.ErrNotFound) {
+				continue
+			}
+			return nil, err
 		}
-		out = append(out, c)
+		for _, child := range children {
+			base := path.Base(child)
+			if !strings.HasSuffix(base, ".json") || strings.HasSuffix(base, ".share.json") {
+				continue
+			}
+			id := strings.TrimSuffix(base, ".json")
+			if !ValidID(id) {
+				continue
+			}
+			c, err := s.loadFrom(ctx, actor, dir, id)
+			if err != nil {
+				continue
+			}
+			out = append(out, c)
+		}
 	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Updated.After(out[j].Updated) })
 	return out, nil
 }
 
@@ -464,7 +551,7 @@ func (s *Service) Unshare(ctx context.Context, actor *actor, id string) error {
 	if err := s.writeOwnerACL(ctx, actor, c.Resource); err != nil {
 		return err
 	}
-	_ = s.deleteAudited(ctx, actor, s.shareMetaPath(actor.PodPath, id))
+	_ = s.deleteAudited(ctx, actor, shareMetaPath(dirOf(c.Resource), id))
 	s.dropShare(id)
 	return nil
 }
@@ -474,7 +561,7 @@ func (s *Service) persistShare(ctx context.Context, actor *actor, rec shareRecor
 	if err != nil {
 		return err
 	}
-	if err := s.putAudited(ctx, actor, s.shareMetaPath(actor.PodPath, rec.ConvoID), "application/json", body); err != nil {
+	if err := s.putAudited(ctx, actor, shareMetaPath(dirOf(rec.Resource), rec.ConvoID), "application/json", body); err != nil {
 		return err
 	}
 	s.mu.Lock()

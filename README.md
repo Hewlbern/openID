@@ -117,6 +117,40 @@ curl -s -X POST https://identity-two-plum.vercel.app/api/spark-conversations \
   -d '{"title":"Spark","messages":[{"role":"user","text":"hi","timestamp":"2026-09-01T10:00:00Z"},{"role":"assistant","text":"hello"}]}'
 ```
 
+## Import your Claude Code and Codex sessions
+
+`scripts/import-sessions.py` (Python 3.9+, standard library only) reads local agent sessions and saves each one as a conversation in your pod, so they show up in `/app` next to Spark saves. Use the **source** dropdown to filter by tool.
+
+| Source | Reads | Stored at |
+|--------|-------|-----------|
+| `claude-code` | `~/.claude/projects/**/*.jsonl` | `{handle}/conversations/claude-code/` |
+| `codex` | `~/.codex/sessions/**/*.jsonl` | `{handle}/conversations/codex/` |
+
+```bash
+# 1. Run a local pod (no Go toolchain needed)
+SOLID_PORT=4000 SOLID_BASE_URL=http://localhost:4000 SOLID_TOKEN_SECRET=local-dev \
+  docker compose up -d --build solid
+
+# 2. Create an account
+curl -s -X POST http://localhost:4000/idp/register -H 'Content-Type: application/json' \
+  -d '{"handle":"me","password":"choose-a-password","name":"Me"}'
+
+# 3. Preview, then import (prompts for the password)
+python3 scripts/import-sessions.py --dry-run --limit 5
+BASE_URL=http://localhost:4000 OPENID_HANDLE=me python3 scripts/import-sessions.py --since 2026-10-01
+
+# 4. Open http://localhost:4000/app and sign in
+```
+
+Options: `--source claude|codex` (repeatable), `--since YYYY-MM-DD`, `--limit N` (newest N per source), `--tools` (one-line tool-call summaries), `--dry-run`.
+
+- IDs are `claude-<sessionId>` / `codex-<sessionId>`, so re-running updates sessions in place. When Codex splits a resumed session across files, the newest file wins.
+- Codex guardian/reviewer sub-sessions and harness blocks (`<system-reminder>`, `<environment_context>`, …) are skipped.
+- Common secret patterns (JWTs, `sk-…`, `ghp_…`, AWS keys, `password=…`) are replaced with `[REDACTED]`. This is a regex pass, not a guarantee: review before sharing a conversation.
+- Messages over 20,000 characters are truncated, and very long sessions keep their most recent messages to stay under the pod's 32 MiB body limit.
+
+Conversation IDs must match `[A-Za-z0-9][A-Za-z0-9_-]{0,127}` and sources `[a-z0-9][a-z0-9-]{0,39}`; anything else is rejected with `400`. `GET /conversations?source=codex` filters by source. Gemini Spark saves stay in `conversations/spark/`, so the Vercel APIs and MCP tools are unchanged. Those Vercel APIs still list only `spark/`; the source-neutral list is on the Go server (`GET /conversations`).
+
 ## Knowledge assets and query evidence
 
 The [knowledge collector](docs/knowledge.md) preserves Markdown, documents, chat

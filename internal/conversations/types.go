@@ -4,7 +4,8 @@ import "time"
 
 const (
 	SourceGeminiSpark = "gemini-spark"
-	SparkDir          = "conversations/spark/"
+	ConversationsDir  = "conversations/"
+	SparkDir          = ConversationsDir + "spark/"
 	SharePrefix       = "/share/c/"
 )
 

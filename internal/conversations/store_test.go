@@ -152,7 +152,7 @@ func TestSaveListShareACL(t *testing.T) {
 		t.Fatalf("saved %#v", c)
 	}
 
-	listed, err := svc.List(ctx, act)
+	listed, err := svc.List(ctx, act, "")
 	if err != nil || len(listed) != 1 {
 		t.Fatalf("list %v %#v", err, listed)
 	}
@@ -389,7 +389,7 @@ func TestSaveTimestampsJSONAndTurtle(t *testing.T) {
 		t.Fatalf("json missing message timestamp\n%s", body)
 	}
 
-	ttlRes, err := store.Get(context.Background(), svc.metaPath(act.PodPath, c.ID))
+	ttlRes, err := store.Get(context.Background(), metaPath(dirOf(c.Resource), c.ID))
 	if err != nil {
 		t.Fatal(err)
 	}
